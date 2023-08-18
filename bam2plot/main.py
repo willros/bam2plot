@@ -9,6 +9,9 @@ import matplotlib
 import os
 import _io
 
+# for windows users
+matplotlib.use('Agg')
+
 
 SORTED_TEMP = "temp112233.sorted"
 
@@ -32,8 +35,8 @@ def create_mpileup_df(
             header=None,
             names=["id", "Position", "base", "coverage", "x", "y"],
         )
-        .assign(Depth=lambda x: x.coverage.rolling(rolling_window).mean())
         .drop(columns=["base", "x", "y"])
+        .assign(Depth=lambda x: x.coverage.rolling(rolling_window).mean())
     )
 
 
