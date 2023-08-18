@@ -4,6 +4,9 @@ The BAM2Plot package provides a comprehensive toolset for processing and visuali
 
 ![plot](example/example.png)
 
+# Caution!
+Right now bam2plot does everthing in memory, so be careful when dealing with **LARGE** files!
+
 ## Installation
 
 You can install BAM2Plot using the following pip command:
