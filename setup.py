@@ -22,6 +22,7 @@ setuptools.setup(
         "seaborn",
         "pysam",
         "fire",
+        "polars",
     ],
     entry_points={"console_scripts": ["bam2plot=bam2plot.main:run"]},
 )

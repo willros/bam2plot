@@ -7,36 +7,42 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib
 import os
-import _io
+import polars as pl
 
 # for windows users
 matplotlib.use('Agg')
 
 
-SORTED_TEMP = "temp112233.sorted"
+SORTED_TEMP = "TEMP112233.sorted"
+MPILEUP_TEMP = "TEMP112233.mpileup"
 
 
 def sort_bam(bam: str, name: str) -> None:
     pysam.sort("-o", name, bam)
 
-
-def run_mpileup(sorted_bam: str) -> _io.StringIO:
-    return StringIO(pysam.mpileup("-a", sorted_bam))
+    
+def run_mpileup(sorted_bam: str) -> None:
+    file = open(MPILEUP_TEMP, "w")
+    pysam.mpileup("-a", sorted_bam, save_stdout="TEMP112233.mpileup", catch_stdout=False)
+    file.close()
 
 
 def create_mpileup_df(
-    sorted_bam: str,
+    mpileup: str,
     rolling_window: int,
 ) -> pd.DataFrame:
     return (
-        pd.read_csv(
-            run_mpileup(sorted_bam),
-            sep="\t",
-            header=None,
-            names=["id", "Position", "base", "coverage", "x", "y"],
+        pl.read_csv(
+            mpileup, 
+            sep="\t", 
+            has_header=False, 
+            new_columns=["id", "Position", "base", "coverage", "x", "y"]
         )
-        .drop(columns=["base", "x", "y"])
-        .assign(Depth=lambda x: x.coverage.rolling(rolling_window).mean())
+        .drop(["base", "x", "y"])
+        .with_columns(
+            pl.col("coverage").rolling_mean(window_size=10).alias("Depth")
+        )
+        .to_pandas()
     )
 
 
@@ -94,9 +100,12 @@ def cli(
 
     print("Sorting bam file")
     sort_bam(bam, name=SORTED_TEMP)
-    print("Parsing bamfile")
-    df = create_mpileup_df(SORTED_TEMP, rolling_window=rolling_window)
+    print("Creating mpileup")
+    run_mpileup(SORTED_TEMP)
     os.remove(SORTED_TEMP)
+    print("Parsing bamfile")
+    df = create_mpileup_df(MPILEUP_TEMP, rolling_window=rolling_window)
+    os.remove(MPILEUP_TEMP)
 
     plot_number = df.id.nunique()
     if plot_number == 0:
