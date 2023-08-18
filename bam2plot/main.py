@@ -66,17 +66,28 @@ def plot_coverage(
     return coverage_plot
 
 
+def make_dir(outpath: str) -> None:
+    outpath = Path(outpath)
+    if not outpath.exists():
+        outpath.mkdir(parents=True)
+
+
+
 def cli(
     bam: str,
-    sample_name: str = "",
     outpath: str = "",
     rolling_window: int = 100,
     threshold: int = 3,
 ) -> None:
-    if sample_name == "":
-        sample_name = Path(bam).stem
+    sample_name = Path(bam).stem
+        
     if outpath == "":
-        outpath = f"{sample_name}_bam2plot"
+        outpath = "bam2plot"
+        make_dir(outpath)
+    else:
+        make_dir(outpath)
+        
+    out_file = f"{outpath}/{sample_name}_bam2plot"
 
     print("Sorting bam file")
     sort_bam(bam, name=SORTED_TEMP)
@@ -96,7 +107,7 @@ def cli(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
         )
 
-        name = f"{outpath}_{reference}"
+        name = f"{out_file}_{reference}"
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
         print(f"Plot for {reference} generated")
