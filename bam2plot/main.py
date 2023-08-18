@@ -16,9 +16,11 @@ SORTED_TEMP = "temp112233.sorted"
 def sort_bam(bam: str, name: str) -> None:
     pysam.sort("-o", name, bam)
 
+
 def run_mpileup(sorted_bam: str) -> _io.StringIO:
     return StringIO(pysam.mpileup("-a", sorted_bam))
-    
+
+
 def create_mpileup_df(
     sorted_bam: str,
     rolling_window: int,
@@ -35,9 +37,8 @@ def create_mpileup_df(
     )
 
 
-
 def plot_coverage(
-    mpileup_df: pd.DataFrame, 
+    mpileup_df: pd.DataFrame,
     sample_name: str,
     threshold: int,
     rolling_window,
@@ -57,7 +58,9 @@ def plot_coverage(
     mean = plt.axhline(y=mean_coverage, color="green")
     mean.set_label(f"Mean coverage: {mean_coverage: .1f}X")
     plt.legend(loc="upper right")
-    plt.title(f"Percent bases with coverage above {threshold}X: {coverage: .1f}% | Rolling window: {rolling_window} nt")
+    plt.title(
+        f"Percent bases with coverage above {threshold}X: {coverage: .1f}% | Rolling window: {rolling_window} nt"
+    )
     plt.suptitle(f"Ref: {mpileup_df.iloc[0].id} | Sample: {sample_name}")
     plt.close()
     return coverage_plot
@@ -74,35 +77,34 @@ def cli(
         sample_name = Path(bam).stem
     if outpath == "":
         outpath = f"{sample_name}_bam2plot"
-        
+
     print("Sorting bam file")
     sort_bam(bam, name=SORTED_TEMP)
     print("Parsing bamfile")
     df = create_mpileup_df(SORTED_TEMP, rolling_window=rolling_window)
     os.remove(SORTED_TEMP)
-    
+
     plot_number = df.id.nunique()
     if plot_number == 0:
         print("No reference to plot against!")
         exit(1)
-        
+
     print(f"Generating {plot_number} plots:")
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference]
-        plot = plot_coverage(mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window)
-        
+        plot = plot_coverage(
+            mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
+        )
+
         name = f"{outpath}_{reference}"
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
         print(f"Plot for {reference} generated")
-    
-        
+
     print("Plots done!")
     print(f"Plots location: {Path(outpath).resolve()}")
     exit(0)
 
 
 def run() -> None:
-    fire.Fire(
-        cli
-    )
+    fire.Fire(cli)
