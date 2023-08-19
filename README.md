@@ -7,6 +7,14 @@ The BAM2Plot package provides a comprehensive toolset for processing and visuali
 # Caution!
 Right now bam2plot does everthing in memory, so be careful when dealing with **LARGE** files!
 
+
+## Dependencies
+`bam2plot` depends on `perbase`, which you can install via:
+```bash
+cargo install perbase 
+# or
+conda install -c bioconda perbase
+```
 ## Installation
 
 You can install BAM2Plot using the following pip command:
@@ -25,8 +33,7 @@ bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <outp
 
 Replace the placeholders with the following information:
 - `<path_to_bam_file>`: Path to the input BAM file (required).
-- `<sample_name>`: Name of the sample (optional, default: stem of the BAM file).
-- `<output_path>`: Path to save the output plots (optional, default: `<sample_name>_bam2plot`).
+- `<outpath>`: Path to save the output plots (optional, default: `<bam2plot>`).
 - `<window_size>`: Rolling window size for calculating the depth average (optional, default: 100).
 - `<coverage_threshold>`: Coverage threshold for plotting (optional, default: 3).
 

@@ -1,49 +1,79 @@
 from pathlib import Path
+import subprocess
 import fire
 import pysam
 import pandas as pd
 from io import StringIO
+import _io
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib
 import os
-import polars as pl
+import pandas
 
 # for windows users
 matplotlib.use('Agg')
 
 
-SORTED_TEMP = "TEMP112233.sorted"
-MPILEUP_TEMP = "TEMP112233.mpileup"
+SORTED_TEMP = "TEMP112233.sorted.bam"
+SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
 
-
-def sort_bam(bam: str, name: str) -> None:
-    pysam.sort("-o", name, bam)
-
+def sort_bam(bam: str, new_name: str) -> None:
+    pysam.sort("-o", new_name, bam)
     
-def run_mpileup(sorted_bam: str) -> None:
-    file = open(MPILEUP_TEMP, "w")
-    pysam.mpileup("-a", sorted_bam, save_stdout="TEMP112233.mpileup", catch_stdout=False)
-    file.close()
-
-
-def create_mpileup_df(
-    mpileup: str,
-    rolling_window: int,
-) -> pd.DataFrame:
-    return (
-        pl.read_csv(
-            mpileup, 
-            sep="\t", 
-            has_header=False, 
-            new_columns=["id", "Position", "base", "coverage", "x", "y"]
+def index_bam(bam: str, new_name: str) -> None:
+    pysam.index(bam, new_name)
+    
+    
+    
+    
+def run_perbase(bam: str) -> _io.StringIO:
+    return StringIO(
+        subprocess.check_output(
+            f"perbase only-depth {bam}", 
+            shell=True, 
+            stderr=subprocess.DEVNULL
         )
-        .drop(["base", "x", "y"])
-        .with_columns(
-            pl.col("coverage").rolling_mean(window_size=10).alias("Depth")
-        )
-        .to_pandas()
+        .decode()
     )
+
+def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
+    return (
+        pd.read_csv(
+            perbase, 
+            sep="\t", 
+        )
+        .rename(columns={"REF": "id", "POS": "Position", "DEPTH": "coverage"})
+    )
+
+
+
+def interpolate_df_ranges(df, rolling_window: int):
+    stop = df.END.max()
+    df_to_interpolate = (
+        pd.DataFrame()
+        .assign(Position=range(1, stop + 1))
+    )
+    
+    return (
+        df
+        .merge(df_to_interpolate, on="Position", how="right")
+        .drop(columns="END")
+        .assign(coverage=lambda x: x.coverage.ffill())
+        .assign(id=lambda x: x.id.ffill())
+        .assign(Depth=lambda x: x.coverage.rolling(rolling_window).mean())
+    )
+
+
+def wrangle_perbase_df(df, rolling_window: int):
+    return pd.concat(
+        [
+            interpolate_df_ranges(df.loc[lambda x: x.id == ref], rolling_window) 
+            for ref in df.id.unique()
+        ],
+        ignore_index=True
+    )
+
 
 
 def plot_coverage(
@@ -87,6 +117,8 @@ def cli(
     outpath: str = "",
     rolling_window: int = 100,
     threshold: int = 3,
+    index: bool = False,
+    sort_and_index: bool = False
 ) -> None:
     sample_name = Path(bam).stem
         
@@ -97,24 +129,46 @@ def cli(
         make_dir(outpath)
         
     out_file = f"{outpath}/{sample_name}_bam2plot"
+    
+        
+    if sort_and_index:
+        print("Sorting bam file")
+        sort_bam(bam, new_name=SORTED_TEMP)
+        print("Indexing bam file")
+        index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
+        perbase = run_perbase(SORTED_TEMP)
+        os.remove(SORTED_TEMP)
+        os.remove(SORTED_TEMP_INDEX)
+    else:
+        if index:
+            print("Indexing bam file")
+            index_name = f"{bam}.bai"
+            index_bam(bam, new_name=index_name)
+        perbase = run_perbase(bam)
+        if index:
+            os.remove(index_name)
 
-    print("Sorting bam file")
-    sort_bam(bam, name=SORTED_TEMP)
-    print("Creating mpileup")
-    run_mpileup(SORTED_TEMP)
-    os.remove(SORTED_TEMP)
-    print("Parsing bamfile")
-    df = create_mpileup_df(MPILEUP_TEMP, rolling_window=rolling_window)
-    os.remove(MPILEUP_TEMP)
+    try:
+        print("Processing dataframe")
+        df = perbase_to_df(perbase)
+        wrangled_df = wrangle_perbase_df(df, rolling_window)
+    except pandas.errors.EmptyDataError as e:
+        print("Error while processing bam")
+        if not sort_and_index:
+            print("Try sorting and indexing the file (-s True)")
+            exit(1)
+        if not index:
+            print("Try indexing the file (-i True)")
+            exit(1)
 
-    plot_number = df.id.nunique()
+    plot_number = wrangled_df.id.nunique()
     if plot_number == 0:
         print("No reference to plot against!")
         exit(1)
 
     print(f"Generating {plot_number} plots:")
-    for reference in df.id.unique():
-        mpileup_df = df.loc[lambda x: x.id == reference]
+    for reference in wrangled_df.id.unique():
+        mpileup_df = wrangled_df.loc[lambda x: x.id == reference]
         plot = plot_coverage(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
         )
