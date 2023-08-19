@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setuptools.setup(
     name="bam2plot",
-    version="0.1.1",
+    version="0.1.4",
     description="Plot of coverage from bam file",
     url="https://github.com/willros/bam2plot",
     author="William Rosenbaum",
@@ -22,7 +22,6 @@ setuptools.setup(
         "seaborn",
         "pysam",
         "fire",
-        "polars",
     ],
     entry_points={"console_scripts": ["bam2plot=bam2plot.main:run"]},
 )
