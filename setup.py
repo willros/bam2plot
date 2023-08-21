@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setuptools.setup(
     name="bam2plot",
-    version="0.1.4",
+    version="0.1.7",
     description="Plot of coverage from bam file",
     url="https://github.com/willros/bam2plot",
     author="William Rosenbaum",
