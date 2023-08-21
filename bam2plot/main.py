@@ -10,13 +10,30 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 import pandas
+import matplotlib.ticker as mtick
 
 # for windows users
 matplotlib.use("Agg")
 
+sns.set_theme()
+
 
 SORTED_TEMP = "TEMP112233.sorted.bam"
 SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
+
+COVERAGE_VALUES = [
+    0,
+    1,
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    40,
+    70,
+    100,
+]
 
 
 def sort_bam(bam: str, new_name: str) -> None:
@@ -36,10 +53,14 @@ def run_perbase(bam: str) -> _io.StringIO:
 
 
 def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
-    return pd.read_csv(
-        perbase,
-        sep="\t",
-    ).rename(columns={"REF": "id", "POS": "Position", "DEPTH": "coverage"})
+    return (
+        pd.read_csv(
+            perbase,
+            sep="\t",
+        )
+        .rename(columns={"REF": "id", "POS": "Position", "DEPTH": "coverage"})
+        .assign(n_bases=lambda x: x.END - x.Position)
+    )
 
 
 def plot_coverage(
@@ -55,7 +76,6 @@ def plot_coverage(
         * 100
     )
 
-    sns.set_theme()
     coverage_plot = plt.figure(figsize=(15, 8))
     sns.lineplot(data=mpileup_df, x="Position", y="Depth")
     zero = plt.axhline(y=0, color="red")
@@ -69,6 +89,44 @@ def plot_coverage(
     plt.suptitle(f"Ref: {mpileup_df.iloc[0].id} | Sample: {sample_name}")
     plt.close()
     return coverage_plot
+
+
+def coverage_for_value(df: pd.DataFrame, COVERAGE: int):
+    number_of_bases = df.n_bases.sum()
+    _id = df.id.iloc[0]
+    percent = (
+        df.loc[lambda x: x.coverage >= COVERAGE].n_bases.sum() / number_of_bases * 100
+    )
+    return pd.DataFrame(
+        {
+            "coverage": [COVERAGE],
+            "percent": [percent],
+            "id": [_id],
+        }
+    )
+
+
+def coverage_for_many_values(df: pd.DataFrame, values: list[int]) -> pd.DataFrame:
+    dfs = []
+    for coverage in values:
+        coverage_df = coverage_for_value(df, coverage)
+        dfs.append(coverage_df)
+    return pd.concat(dfs, ignore_index=True)
+
+
+def plot_cumulative_coverage_for_all(perbase_df: pd.DataFrame):
+    all_coverage = pd.concat(
+        [
+            coverage_for_many_values(
+                perbase_df.loc[lambda x: x.id == ref], COVERAGE_VALUES
+            )
+            for ref in perbase_df.id.unique()
+        ]
+    )
+    grid = sns.FacetGrid(all_coverage, col="id", height=2.5, col_wrap=5)
+    grid.map_dataframe(sns.lineplot, x="coverage", y="percent")
+    plt.close()
+    return grid.fig
 
 
 def make_dir(outpath: str) -> None:
@@ -89,15 +147,13 @@ def cli(
         print(f"The file {bam} does not exist")
         exit(1)
 
-    sample_name = Path(bam).stem
-
     if outpath == "":
         outpath = "bam2plot"
         make_dir(outpath)
     else:
         make_dir(outpath)
 
-    out_file = f"{outpath}/{sample_name}_bam2plot"
+    sample_name = Path(bam).stem
 
     if sort_and_index:
         print("Sorting bam file")
@@ -135,6 +191,7 @@ def cli(
         exit(1)
 
     print(f"Generating {plot_number} plots:")
+    out_file = f"{outpath}/{sample_name}_bam2plot"
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
             Depth=lambda x: x.coverage.rolling(rolling_window).mean()
@@ -147,6 +204,15 @@ def cli(
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
         print(f"Plot for {reference} generated")
+
+    print("Coverage plots done!")
+
+    print("Generating cumulative coverage plots for each reference")
+    cum_plot = plot_cumulative_coverage_for_all(df)
+    cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
+    cum_plot.savefig(f"{cum_plot_name}.png")
+    cum_plot.savefig(f"{cum_plot_name}.svg")
+    print(f"Cumulative plot generated!")
 
     print("Plots done!")
     print(f"Plots location: {Path(outpath).resolve()}")

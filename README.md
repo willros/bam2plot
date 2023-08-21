@@ -2,7 +2,11 @@
 
 The BAM2Plot package provides a comprehensive toolset for processing and visualizing coverage data from BAM files. This package simplifies the analysis process and enables the generation of coverage plots for multiple reference sequences within a single BAM file.
 
+bam2plot generates coverage plots:
 ![plot](example/example.png)
+
+... and cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
+![plot](example/cumplot.png)
 
 
 ## Dependencies
