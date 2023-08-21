@@ -4,9 +4,6 @@ The BAM2Plot package provides a comprehensive toolset for processing and visuali
 
 ![plot](example/example.png)
 
-# Caution!
-Right now bam2plot does everthing in memory, so be careful when dealing with **LARGE** files!
-
 
 ## Dependencies
 `bam2plot` depends on `perbase`, which you can install via:

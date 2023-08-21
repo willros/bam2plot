@@ -42,29 +42,6 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
     ).rename(columns={"REF": "id", "POS": "Position", "DEPTH": "coverage"})
 
 
-def interpolate_df_ranges(df, rolling_window: int):
-    stop = df.END.max()
-    df_to_interpolate = pd.DataFrame().assign(Position=range(1, stop + 1))
-
-    return (
-        df.merge(df_to_interpolate, on="Position", how="right")
-        .drop(columns="END")
-        .assign(coverage=lambda x: x.coverage.ffill())
-        .assign(id=lambda x: x.id.ffill())
-        .assign(Depth=lambda x: x.coverage.rolling(rolling_window).mean())
-    )
-
-
-def wrangle_perbase_df(df, rolling_window: int):
-    return pd.concat(
-        [
-            interpolate_df_ranges(df.loc[lambda x: x.id == ref], rolling_window)
-            for ref in df.id.unique()
-        ],
-        ignore_index=True,
-    )
-
-
 def plot_coverage(
     mpileup_df: pd.DataFrame,
     sample_name: str,
@@ -103,11 +80,15 @@ def make_dir(outpath: str) -> None:
 def cli(
     bam: str,
     outpath: str = "",
-    rolling_window: int = 100,
+    rolling_window: int = 10,
     threshold: int = 3,
     index: bool = False,
     sort_and_index: bool = False,
 ) -> None:
+    if not Path(bam).exists():
+        print(f"The file {bam} does not exist")
+        exit(1)
+
     sample_name = Path(bam).stem
 
     if outpath == "":
@@ -123,7 +104,6 @@ def cli(
         sort_bam(bam, new_name=SORTED_TEMP)
         print("Indexing bam file")
         index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
-        print("Running perbase")
         perbase = run_perbase(SORTED_TEMP)
         os.remove(SORTED_TEMP)
         os.remove(SORTED_TEMP_INDEX)
@@ -132,7 +112,6 @@ def cli(
             print("Indexing bam file")
             index_name = f"{bam}.bai"
             index_bam(bam, new_name=index_name)
-        print("Running perbase")
         perbase = run_perbase(bam)
         if index:
             os.remove(index_name)
@@ -140,24 +119,26 @@ def cli(
     try:
         print("Processing dataframe")
         df = perbase_to_df(perbase)
-        wrangled_df = wrangle_perbase_df(df, rolling_window)
     except pandas.errors.EmptyDataError as e:
         print("Error while processing bam")
         if not sort_and_index:
-            print("Try sorting and indexing the file (-s True)")
+            print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
+            print("Is the file sorted? If not, run 'bam2plot <file.bam> -s True'")
             exit(1)
         if not index:
-            print("Try indexing the file (-i True)")
+            print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
             exit(1)
 
-    plot_number = wrangled_df.id.nunique()
+    plot_number = df.id.nunique()
     if plot_number == 0:
         print("No reference to plot against!")
         exit(1)
 
     print(f"Generating {plot_number} plots:")
-    for reference in wrangled_df.id.unique():
-        mpileup_df = wrangled_df.loc[lambda x: x.id == reference]
+    for reference in df.id.unique():
+        mpileup_df = df.loc[lambda x: x.id == reference].assign(
+            Depth=lambda x: x.coverage.rolling(rolling_window).mean()
+        )
         plot = plot_coverage(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
         )
