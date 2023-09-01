@@ -59,6 +59,7 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
             sep="\t",
         )
         .rename(columns={"REF": "id", "POS": "Position", "DEPTH": "coverage"})
+        .assign(coverage=lambda x: x.coverage.fillna(0))
         .assign(n_bases=lambda x: x.END - x.Position)
     )
 
@@ -106,7 +107,7 @@ def coverage_for_value(df: pd.DataFrame, COVERAGE: int):
     )
 
 
-def coverage_for_many_values(df: pd.DataFrame, values: list[int]) -> pd.DataFrame:
+def coverage_for_many_values(df: pd.DataFrame, values) -> pd.DataFrame:
     dfs = []
     for coverage in values:
         coverage_df = coverage_for_value(df, coverage)
