@@ -35,6 +35,7 @@ bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <outp
 Replace the placeholders with the following information:
 - `<path_to_bam_file>`: Path to the input BAM file (required).
 - `<outpath>`: Path to save the output plots (optional, default: `<bam2plot>`).
+- `<whitelist>`: List of chromosomes or reference sequences to keep. A comma separated list. Example: `--whitelist=seq1,seq2`
 - `<window_size>`: Rolling window size for calculating the depth average (optional, default: 100).
 - `<coverage_threshold>`: Coverage threshold for plotting (optional, default: 3).
 
