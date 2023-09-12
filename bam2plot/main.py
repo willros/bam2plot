@@ -9,11 +9,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib
 import os
+import platform
 import pandas
 import matplotlib.ticker as mtick
 
 # for windows users
-matplotlib.use("Agg")
+if platform.system() == "Windows":
+    matplotlib.use("Agg")
 
 sns.set_theme()
 
@@ -139,6 +141,7 @@ def make_dir(outpath: str) -> None:
 def cli(
     bam: str,
     outpath: str = "",
+    whitelist: list = None,
     rolling_window: int = 10,
     threshold: int = 3,
     index: bool = False,
@@ -186,6 +189,11 @@ def cli(
             print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
             exit(1)
 
+    # filter the df to wanted ref or chromosomes:
+    if whitelist:
+        whitelist = [whitelist] if type(whitelist) == str else whitelist
+        df = df.loc[lambda x: x.id.isin(whitelist)]
+        
     plot_number = df.id.nunique()
     if plot_number == 0:
         print("No reference to plot against!")
