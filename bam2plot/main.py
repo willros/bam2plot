@@ -70,7 +70,7 @@ def plot_coverage(
     mpileup_df: pd.DataFrame,
     sample_name: str,
     threshold: int,
-    rolling_window,
+    rolling_window: int,
 ) -> matplotlib.figure.Figure:
     mean_coverage = mpileup_df.coverage.mean()
     coverage = (
@@ -146,6 +146,7 @@ def cli(
     threshold: int = 3,
     index: bool = False,
     sort_and_index: bool = False,
+    zoom: bool | str = False,
 ) -> None:
     if not Path(bam).exists():
         print(f"The file {bam} does not exist")
@@ -205,6 +206,10 @@ def cli(
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
             Depth=lambda x: x.coverage.rolling(rolling_window).mean()
         )
+        if zoom:
+            start = int(zoom.split(" ")[0])
+            end = int(zoom.split(" ")[1])
+            mpileup_df = mpileup_df.loc[lambda x: x.Position.between(start, end)]
         plot = plot_coverage(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
         )
