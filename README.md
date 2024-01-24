@@ -29,7 +29,7 @@ pip install bam2plot
 Once installed, you can use the `bam2plot` command to perform coverage analysis on BAM files and generate coverage plots. Here's how to use it:
 
 ```bash
-bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <output_path>] [--rolling_window <window_size>] [--threshold <coverage_threshold>]
+bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <output_path>] [--rolling_window <window_size>] [--threshold <coverage_threshold>] [--zoom <"start end">]
 ```
 
 Replace the placeholders with the following information:
@@ -38,6 +38,7 @@ Replace the placeholders with the following information:
 - `<whitelist>`: List of chromosomes or reference sequences to keep. A comma separated list. Example: `--whitelist=seq1,seq2`
 - `<window_size>`: Rolling window size for calculating the depth average (optional, default: 100).
 - `<coverage_threshold>`: Coverage threshold for plotting (optional, default: 3).
+- `<zoom>`: Region to zoom into. Example: "100 200" zooms into position 100-200. (optional, default: False)
 
 ## Outputs
 
