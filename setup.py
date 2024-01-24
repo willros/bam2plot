@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setuptools.setup(
     name="bam2plot",
-    version="0.1.9",
+    version="0.2.0",
     description="Plot of coverage from bam file",
     url="https://github.com/willros/bam2plot",
     author="William Rosenbaum",
@@ -16,7 +16,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     install_requires=[
         "pandas",
         "seaborn",
