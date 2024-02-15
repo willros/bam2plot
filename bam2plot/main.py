@@ -12,6 +12,7 @@ import os
 import platform
 import pandas
 import matplotlib.ticker as mtick
+import numpy as np
 
 # for windows users
 if platform.system() == "Windows":
@@ -64,6 +65,17 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
         .assign(coverage=lambda x: x.coverage.fillna(0))
         .assign(n_bases=lambda x: x.END - x.Position)
     )
+
+
+def print_coverage_info(df: pd.DataFrame, threshold: int) -> None:
+    name = df.iloc[0].id
+    print(f"Coverage information for: {name}")
+    print(f"{np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
+    print(f"{np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X")
+    print(f"median coverage: {df['coverage'].median(): .0f}X")
+    print(f"mean coverage: {df['coverage'].mean(): .0f}X")
+    
+
 
 
 def plot_coverage(
@@ -148,6 +160,13 @@ def cli(
     sort_and_index: bool = False,
     zoom: bool | str = False,
 ) -> None:
+    if zoom:
+        start = int(zoom.split(" ")[0])
+        end = int(zoom.split(" ")[1])
+        if start >= end:
+            print("Start value of zoom must be lower than end value.")
+            exit(1)
+
     if not Path(bam).exists():
         print(f"The file {bam} does not exist")
         exit(1)
@@ -207,9 +226,12 @@ def cli(
             Depth=lambda x: x.coverage.rolling(rolling_window).mean()
         )
         if zoom:
-            start = int(zoom.split(" ")[0])
-            end = int(zoom.split(" ")[1])
             mpileup_df = mpileup_df.loc[lambda x: x.Position.between(start, end)]
+            if mpileup_df.shape[0] == 0:
+                print("No positions to plot after zoom")
+                exit(1)
+
+        print_coverage_info(mpileup_df, threshold)
         plot = plot_coverage(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
         )
