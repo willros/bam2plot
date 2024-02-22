@@ -14,6 +14,7 @@ import pandas
 import matplotlib.ticker as mtick
 import numpy as np
 
+
 # for windows users
 if platform.system() == "Windows":
     matplotlib.use("Agg")
@@ -71,11 +72,22 @@ def print_coverage_info(df: pd.DataFrame, threshold: int) -> None:
     name = df.iloc[0].id
     print(f"Coverage information for: {name}")
     print(f"{np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
-    print(f"{np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X")
+    print(
+        f"{np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
+    )
     print(f"median coverage: {df['coverage'].median(): .0f}X")
     print(f"mean coverage: {df['coverage'].mean(): .0f}X")
-    
 
+
+def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
+    mean_coverage = df.coverage.mean()
+    coverage_over_threshold = (
+        sum(1 if x > threshold else 0 for x in df.coverage) / df.shape[0] * 100
+    )
+    print(f"Mean coverage of all basepairs: {mean_coverage: .1f}X")
+    print(
+        f"Percent bases with coverage above {threshold}X: {coverage_over_threshold: .1f}%"
+    )
 
 
 def plot_coverage(
@@ -197,6 +209,7 @@ def cli(
             os.remove(index_name)
 
     try:
+        print("-----------------------------")
         print("Processing dataframe")
         df = perbase_to_df(perbase)
     except pandas.errors.EmptyDataError as e:
@@ -208,18 +221,30 @@ def cli(
         if not index:
             print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
             exit(1)
+    print("-----------------------------")
+    print("")
 
+    print("-----------------------------")
+    # Average coverage for total reference
+    print_total_reference_info(df, threshold)
+    print("-----------------------------")
+    print("")
+
+    print("-----------------------------")
     # filter the df to wanted ref or chromosomes:
     if whitelist:
         whitelist = [whitelist] if type(whitelist) == str else whitelist
+        print(f"Only looking for references in the whitelist: {whitelist}")
         df = df.loc[lambda x: x.id.isin(whitelist)]
-        
+
     plot_number = df.id.nunique()
     if plot_number == 0:
         print("No reference to plot against!")
         exit(1)
 
     print(f"Generating {plot_number} plots:")
+    print("-----------------------------")
+    print("")
     out_file = f"{outpath}/{sample_name}_bam2plot"
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
@@ -231,6 +256,7 @@ def cli(
                 print("No positions to plot after zoom")
                 exit(1)
 
+        print("-----------------------------")
         print_coverage_info(mpileup_df, threshold)
         plot = plot_coverage(
             mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
@@ -240,18 +266,29 @@ def cli(
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
         print(f"Plot for {reference} generated")
+        print("-----------------------------")
+        print("")
 
+    print("-----------------------------")
     print("Coverage plots done!")
+    print("-----------------------------")
+    print("")
 
+    print("-----------------------------")
     print("Generating cumulative coverage plots for each reference")
     cum_plot = plot_cumulative_coverage_for_all(df)
     cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
     cum_plot.savefig(f"{cum_plot_name}.png")
     cum_plot.savefig(f"{cum_plot_name}.svg")
     print(f"Cumulative plot generated!")
+    print("-----------------------------")
+    print("")
 
+    print("-----------------------------")
     print("Plots done!")
     print(f"Plots location: {Path(outpath).resolve()}")
+    print("-----------------------------")
+    print("")
     exit(0)
 
 
