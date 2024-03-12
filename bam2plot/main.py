@@ -52,7 +52,7 @@ def run_perbase(bam: str) -> _io.StringIO:
     return StringIO(
         subprocess.check_output(
             f"perbase only-depth {bam}", shell=True, stderr=subprocess.DEVNULL
-        ).decode()
+        ).decode(errors="ignore")
     )
 
 
@@ -95,7 +95,16 @@ def plot_coverage(
     sample_name: str,
     threshold: int,
     rolling_window: int,
+    log_scale: bool = False,
 ) -> matplotlib.figure.Figure:
+    if log_scale:
+        mpileup_df = (
+                mpileup_df
+                .assign(coverage=lambda x: np.log10(x.coverage + 1))
+                .assign(Depth=lambda x: np.log10(x.Depth + 1))
+        )
+        threshold = np.log10(threshold)
+
     mean_coverage = mpileup_df.coverage.mean()
     coverage = (
         sum(1 if x > threshold else 0 for x in mpileup_df.coverage)
@@ -171,6 +180,7 @@ def cli(
     index: bool = False,
     sort_and_index: bool = False,
     zoom: bool | str = False,
+    log_scale: bool = False
 ) -> None:
     if zoom:
         start = int(zoom.split(" ")[0])
@@ -258,8 +268,9 @@ def cli(
 
         print("-----------------------------")
         print_coverage_info(mpileup_df, threshold)
+
         plot = plot_coverage(
-            mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window
+            mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window, log_scale=log_scale
         )
 
         name = f"{out_file}_{reference}"
