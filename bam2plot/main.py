@@ -1,6 +1,5 @@
 from pathlib import Path
 import subprocess
-import fire
 import pysam
 import pandas as pd
 from io import StringIO
@@ -51,20 +50,6 @@ sns.set_theme()
 
 SORTED_TEMP = "TEMP112233.sorted.bam"
 SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
-
-COVERAGE_VALUES = [
-    0,
-    1,
-    5,
-    10,
-    15,
-    20,
-    25,
-    30,
-    40,
-    70,
-    100,
-]
 
 
 def sort_bam(bam: str, new_name: str) -> None:
@@ -156,7 +141,7 @@ def plot_coverage(
 
 def coverage_for_value(df: pd.DataFrame, COVERAGE: int):
     number_of_bases = df.n_bases.sum()
-    _id = df.id.iloc[0]
+    _id = df.id.iloc[0][:20]
     percent = (
         df.loc[lambda x: x.coverage >= COVERAGE].n_bases.sum() / number_of_bases * 100
     )
@@ -178,10 +163,13 @@ def coverage_for_many_values(df: pd.DataFrame, values) -> pd.DataFrame:
 
 
 def plot_cumulative_coverage_for_all(perbase_df: pd.DataFrame):
+    max_cov = perbase_df.coverage.max()
+    coverage_values = np.linspace(0, max_cov, 15)
+
     all_coverage = pd.concat(
         [
             coverage_for_many_values(
-                perbase_df.loc[lambda x: x.id == ref], COVERAGE_VALUES
+                perbase_df.loc[lambda x: x.id == ref], coverage_values
             )
             for ref in perbase_df.id.unique()
         ]
@@ -221,12 +209,18 @@ def cli():
         required=False,
         default=3,
         help="Threshold of mean coverage depth",
+        type=int,
     )
     parser.add_argument(
         "-r", "--rolling_window", required=False, default=10, help="Rolling window size"
     )
     parser.add_argument(
-        "-i", "--index", required=False, default=False, help="Index bam file"
+        "-i",
+        "--index",
+        required=False,
+        default=False,
+        help="Index bam file",
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "-s",
@@ -234,6 +228,7 @@ def cli():
         required=False,
         default=False,
         help="Index and sort bam file",
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "-z",
@@ -243,7 +238,12 @@ def cli():
         help="Zoom into this region. Example: -z='100 2000'",
     )
     parser.add_argument(
-        "-l", "--log_scale", required=False, default=False, help="Log scale of Y axis"
+        "-l",
+        "--log_scale",
+        required=False,
+        default=False,
+        help="Log scale of Y axis",
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "-c",
@@ -251,6 +251,7 @@ def cli():
         required=False,
         default=False,
         help="Generate cumulative plots of all chromosomes",
+        action=argparse.BooleanOptionalAction,
     )
 
     args = parser.parse_args()
@@ -369,7 +370,8 @@ def main(
         print_fail("[ERROR]: No reference to plot against!")
         exit(1)
 
-    print_green(f"[INFO]: Generating {plot_number} plots:")
+    plot_text = "plot" if plot_number == 1 else "plots"
+    print_green(f"[INFO]: Generating {plot_number} {plot_text}:")
     out_file = f"{outpath}/{sample_name}_bam2plot"
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
