@@ -29,7 +29,7 @@ pip install bam2plot
 Once installed, you can use the `bam2plot` command to perform coverage analysis on BAM files and generate coverage plots. Here's how to use it:
 
 ```bash
-bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <output_path>] [--rolling_window <window_size>] [--threshold <coverage_threshold>] [--zoom <"start end">]
+bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <output_path>] [--rolling_window <window_size>] [--threshold <coverage_threshold>] [--zoom <"start end">] [--log_scale <True | False>] [--cum_plot <True | False>]
 ```
 
 Replace the placeholders with the following information:
