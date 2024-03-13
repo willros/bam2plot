@@ -25,52 +25,45 @@ pip install bam2plot
 ```
 
 ## Usage
-
 Once installed, you can use the `bam2plot` command to perform coverage analysis on BAM files and generate coverage plots. Here's how to use it:
 
 ```bash
-bam2plot --bam <path_to_bam_file> [--sample_name <sample_name>] [--outpath <output_path>] [--rolling_window <window_size>] [--threshold <coverage_threshold>] [--zoom <"start end">] [--log_scale <True | False>] [--cum_plot <True | False>]
-```
+usage: bam2plot [-h] -b BAM [-o OUTPATH] [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW] [-i | --index | --no-index]
+                [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM] [-l | --log_scale | --no-log_scale]
+                [-c | --cum_plot | --no-cum_plot]
 
-Replace the placeholders with the following information:
-- `<path_to_bam_file>`: Path to the input BAM file (required).
-- `<outpath>`: Path to save the output plots (optional, default: `<bam2plot>`).
-- `<whitelist>`: List of chromosomes or reference sequences to keep. A comma separated list. Example: `--whitelist=seq1,seq2`
-- `<window_size>`: Rolling window size for calculating the depth average (optional, default: 100).
-- `<coverage_threshold>`: Coverage threshold for plotting (optional, default: 3).
-- `<zoom>`: Region to zoom into. Example: "100 200" zooms into position 100-200. (optional, default: False)
-- `<log_scale>`: Whether to use a log scale on the Y axis of the plots. (optional, defualt: False) Example: `--log_scale=True`
-- `<cum_plot>`: Whether to plot cumulative coverage for all chromosomes or not. (optional, defualt: False) Example: `--cum_plot=True`
+Plot your bam files!
+
+options:
+  -h, --help            show this help message and exit
+  -b BAM, --bam BAM     bam file
+  -o OUTPATH, --outpath OUTPATH
+                        Where to save the plots.
+  -w WHITELIST, --whitelist WHITELIST
+                        Only include these references/chromosomes.
+  -t THRESHOLD, --threshold THRESHOLD
+                        Threshold of mean coverage depth
+  -r ROLLING_WINDOW, --rolling_window ROLLING_WINDOW
+                        Rolling window size
+  -i, --index, --no-index
+                        Index bam file (default: False)
+  -s, --sort_and_index, --no-sort_and_index
+                        Index and sort bam file (default: False)
+  -z ZOOM, --zoom ZOOM  Zoom into this region. Example: -z='100 2000'
+  -l, --log_scale, --no-log_scale
+                        Log scale of Y axis (default: False)
+  -c, --cum_plot, --no-cum_plot
+                        Generate cumulative plots of all chromosomes (default: False)
+```
 
 ## Outputs
 
 The BAM2Plot package generates coverage plots for each reference sequence in the BAM file. The plots are saved as SVG and PNG files in the specified output path or the default location.
-
-## API Documentation
-
-The BAM2Plot package provides several modules and functions for performing coverage analysis. Here's an overview of the main components:
-
-### `bam2plot.sorting`
-
-This module handles sorting BAM files using the `pysam` library.
-
-### `bam2plot.mpileup`
-
-This module performs the `pysam.mpileup` operation and processes the output.
-
-### `bam2plot.analysis`
-
-This module creates a Pandas DataFrame from the `mpileup` output and calculates the rolling average depth.
-
-### `bam2plot.plotting`
-
-This module generates coverage plots using `seaborn` and `matplotlib` libraries.
-
 
 ## Examples
 
 Here's an example of how to use the BAM2Plot package:
 
 ```bash
-bam2plot --bam input.bam --sample_name my_sample --outpath output_folder --rolling_window 50 --threshold 5
+bam2plot --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c
 ```
