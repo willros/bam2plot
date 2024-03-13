@@ -265,6 +265,10 @@ def cli(
             if mpileup_df.shape[0] == 0:
                 print("No positions to plot after zoom")
                 exit(1)
+                
+        if mpileup_df.shape[0] == 0:
+            print("No positions to plot")
+            exit(1)
 
         print("-----------------------------")
         print_coverage_info(mpileup_df, threshold)
