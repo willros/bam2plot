@@ -1,6 +1,6 @@
-# BAM2Plot Package Documentation
+# BAM2PLOT
 
-The BAM2Plot package provides a comprehensive toolset for processing and visualizing coverage data from BAM files. This package simplifies the analysis process and enables the generation of coverage plots for multiple reference sequences within a single BAM file.
+Plot your bam files!
 
 bam2plot generates coverage plots:
 ![plot](example/example.png)
@@ -18,7 +18,7 @@ conda install -c bioconda perbase
 ```
 ## Installation
 
-You can install BAM2Plot using the following pip command:
+You can install `bam2plot` using the following pip command:
 
 ```bash
 pip install bam2plot
