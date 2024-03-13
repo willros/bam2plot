@@ -15,6 +15,7 @@ import matplotlib.ticker as mtick
 import numpy as np
 import argparse
 
+
 class bcolors:
     OKBLUE = "\033[94m"
     OKCYAN = "\033[96m"
@@ -23,13 +24,20 @@ class bcolors:
     FAIL = "\033[91m"
     ENDC = "\033[0m"
     UNDERLINE = "\033[4m"
-    
+
+
 def print_green(text):
     print(f"{bcolors.OKGREEN}{text}{bcolors.ENDC}")
+
+
 def print_warning(text):
     print(f"{bcolors.WARNING}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
+
+
 def print_fail(text):
     print(f"{bcolors.FAIL}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
+
+
 def print_blue(text):
     print(f"{bcolors.OKBLUE}{text}{bcolors.ENDC}")
 
@@ -90,7 +98,9 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
 def print_coverage_info(df: pd.DataFrame, threshold: int) -> None:
     name = df.iloc[0].id
     print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
-    print_blue(f"   [SUMMARIZE]: {np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
+    print_blue(
+        f"   [SUMMARIZE]: {np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage"
+    )
     print_blue(
         f"   [SUMMARIZE]: {np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
     )
@@ -117,11 +127,9 @@ def plot_coverage(
     log_scale: bool = False,
 ) -> matplotlib.figure.Figure:
     if log_scale:
-        mpileup_df = (
-                mpileup_df
-                .assign(coverage=lambda x: np.log10(x.coverage + 1))
-                .assign(Depth=lambda x: np.log10(x.Depth + 1))
-        )
+        mpileup_df = mpileup_df.assign(
+            coverage=lambda x: np.log10(x.coverage + 1)
+        ).assign(Depth=lambda x: np.log10(x.Depth + 1))
         threshold = np.log10(threshold)
 
     mean_coverage = mpileup_df.coverage.mean()
@@ -190,22 +198,29 @@ def make_dir(outpath: str) -> None:
         outpath.mkdir(parents=True)
 
 
-        
 def cli():
-    parser = argparse.ArgumentParser(
-        description="Plot your bam files!"
+    parser = argparse.ArgumentParser(description="Plot your bam files!")
+    parser.add_argument("-b", "--bam", required=True, help="bam file")
+    parser.add_argument(
+        "-o",
+        "--outpath",
+        required=False,
+        default="bam2plots",
+        help="Where to save the plots.",
     )
     parser.add_argument(
-        "-b", "--bam", required=True, help="bam file"
+        "-w",
+        "--whitelist",
+        required=False,
+        default=None,
+        help="Only include these references/chromosomes.",
     )
     parser.add_argument(
-        "-o", "--outpath", required=False, default="bam2plots", help="Where to save the plots."
-    )
-    parser.add_argument(
-        "-w", "--whitelist", required=False, default=None, help="Only include these references/chromosomes."
-    )
-    parser.add_argument(
-        "-t", "--threshold", required=False, default=3, help="Threshold of mean coverage depth"
+        "-t",
+        "--threshold",
+        required=False,
+        default=3,
+        help="Threshold of mean coverage depth",
     )
     parser.add_argument(
         "-r", "--rolling_window", required=False, default=10, help="Rolling window size"
@@ -214,20 +229,32 @@ def cli():
         "-i", "--index", required=False, default=False, help="Index bam file"
     )
     parser.add_argument(
-        "-s", "--sort_and_index", required=False, default=False, help="Index and sort bam file"
+        "-s",
+        "--sort_and_index",
+        required=False,
+        default=False,
+        help="Index and sort bam file",
     )
     parser.add_argument(
-        "-z", "--zoom", required=False, default=False, help="Zoom into this region. Example: -z='100 2000'"
+        "-z",
+        "--zoom",
+        required=False,
+        default=False,
+        help="Zoom into this region. Example: -z='100 2000'",
     )
     parser.add_argument(
         "-l", "--log_scale", required=False, default=False, help="Log scale of Y axis"
     )
     parser.add_argument(
-        "-c", "--cum_plot", required=False, default=False, help="Generate cumulative plots of all chromosomes"
+        "-c",
+        "--cum_plot",
+        required=False,
+        default=False,
+        help="Generate cumulative plots of all chromosomes",
     )
-    
+
     args = parser.parse_args()
-    
+
     main(
         bam=args.bam,
         outpath=args.outpath,
@@ -240,12 +267,12 @@ def cli():
         log_scale=args.log_scale,
         cum_plot=args.cum_plot,
     )
-    
-    
+
+
 def if_sort_and_index(sort_and_index, index, bam):
     if not sort_and_index and not index:
         return run_perbase(bam)
-    
+
     if sort_and_index:
         print_green("[INFO]: Sorting bam file")
         sort_bam(bam, new_name=SORTED_TEMP)
@@ -255,7 +282,7 @@ def if_sort_and_index(sort_and_index, index, bam):
         print_green("[INFO]: Indexing bam file")
         index_name = f"{bam}.bai"
         index_bam(bam, new_name=index_name)
-        
+
     try:
         if sort_and_index:
             perbase = run_perbase(SORTED_TEMP)
@@ -270,10 +297,10 @@ def if_sort_and_index(sort_and_index, index, bam):
             os.remove(SORTED_TEMP_INDEX)
         if index:
             os.remove(index_name)
-    
+
         return perbase
 
-    
+
 def process_dataframe(perbase, sort_and_index, index):
     try:
         print_green("[INFO]: Processing dataframe")
@@ -281,14 +308,21 @@ def process_dataframe(perbase, sort_and_index, index):
     except:
         print_fail("[ERROR]: Could not process dataframe")
         if not sort_and_index:
-            print_warning("[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
-            print_warning("[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s True'")
+            print_warning(
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+            )
+            print_warning(
+                "[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s True'"
+            )
             exit(1)
         if not index:
-            print_warning("[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
+            print_warning(
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+            )
             exit(1)
-            
+
     return df
+
 
 def main(
     bam,
@@ -316,16 +350,18 @@ def main(
 
     make_dir(outpath)
     sample_name = Path(bam).stem
-    
+
     perbase = if_sort_and_index(sort_and_index, index, bam)
-    
+
     df = process_dataframe(perbase, sort_and_index, index)
-    
+
     print_total_reference_info(df, threshold)
 
     if whitelist:
         whitelist = [whitelist] if type(whitelist) == str else whitelist
-        print_green(f"[INFO]: Only looking for references in the whitelist: {whitelist}")
+        print_green(
+            f"[INFO]: Only looking for references in the whitelist: {whitelist}"
+        )
         df = df.loc[lambda x: x.id.isin(whitelist)]
 
     plot_number = df.id.nunique()
@@ -344,7 +380,7 @@ def main(
             if mpileup_df.shape[0] == 0:
                 print_warning("[WARNING]: No positions to plot after zoom")
                 continue
-                
+
         if mpileup_df.shape[0] == 0:
             print_warning("[WARNING]: No positions to plot")
             continue
@@ -352,7 +388,11 @@ def main(
         print_coverage_info(mpileup_df, threshold)
 
         plot = plot_coverage(
-            mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window, log_scale=log_scale
+            mpileup_df,
+            sample_name,
+            threshold=threshold,
+            rolling_window=rolling_window,
+            log_scale=log_scale,
         )
 
         name = f"{out_file}_{reference}"
@@ -369,7 +409,7 @@ def main(
         cum_plot.savefig(f"{cum_plot_name}.png")
         cum_plot.savefig(f"{cum_plot_name}.svg")
         print_green(f"[INFO]: Cumulative plot generated!")
-        
+
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
     exit(0)
 
