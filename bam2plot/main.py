@@ -65,7 +65,7 @@ def index_bam(bam: str, new_name: str) -> None:
     except:
         print_fail("[ERROR]: The file is not a bam file!")
         exit(1)
-        
+
 
 def run_perbase(bam: str) -> _io.StringIO:
     return StringIO(
