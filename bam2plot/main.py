@@ -180,7 +180,8 @@ def cli(
     index: bool = False,
     sort_and_index: bool = False,
     zoom: bool | str = False,
-    log_scale: bool = False
+    log_scale: bool = False,
+    cum_plot: bool = False,
 ) -> None:
     if zoom:
         start = int(zoom.split(" ")[0])
@@ -264,11 +265,13 @@ def cli(
             mpileup_df = mpileup_df.loc[lambda x: x.Position.between(start, end)]
             if mpileup_df.shape[0] == 0:
                 print("No positions to plot after zoom")
-                exit(1)
+                continue
+                #exit(1)
                 
         if mpileup_df.shape[0] == 0:
             print("No positions to plot")
-            exit(1)
+            continue
+            #exit(1)
 
         print("-----------------------------")
         print_coverage_info(mpileup_df, threshold)
@@ -290,14 +293,15 @@ def cli(
     print("")
 
     print("-----------------------------")
-    print("Generating cumulative coverage plots for each reference")
-    cum_plot = plot_cumulative_coverage_for_all(df)
-    cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
-    cum_plot.savefig(f"{cum_plot_name}.png")
-    cum_plot.savefig(f"{cum_plot_name}.svg")
-    print(f"Cumulative plot generated!")
-    print("-----------------------------")
-    print("")
+    if cum_plot:
+        print("Generating cumulative coverage plots for each reference")
+        cum_plot = plot_cumulative_coverage_for_all(df)
+        cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
+        cum_plot.savefig(f"{cum_plot_name}.png")
+        cum_plot.savefig(f"{cum_plot_name}.svg")
+        print(f"Cumulative plot generated!")
+        print("-----------------------------")
+        print("")
 
     print("-----------------------------")
     print("Plots done!")
