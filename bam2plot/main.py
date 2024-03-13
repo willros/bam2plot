@@ -14,6 +14,16 @@ import matplotlib.ticker as mtick
 import numpy as np
 import argparse
 
+# for windows users
+if platform.system() == "Windows":
+    matplotlib.use("Agg")
+
+sns.set_theme()
+
+
+SORTED_TEMP = "TEMP112233.sorted.bam"
+SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
+
 
 class bcolors:
     OKBLUE = "\033[94m"
@@ -41,24 +51,21 @@ def print_blue(text):
     print(f"{bcolors.OKBLUE}{text}{bcolors.ENDC}")
 
 
-# for windows users
-if platform.system() == "Windows":
-    matplotlib.use("Agg")
-
-sns.set_theme()
-
-
-SORTED_TEMP = "TEMP112233.sorted.bam"
-SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
-
-
 def sort_bam(bam: str, new_name: str) -> None:
-    pysam.sort("-o", new_name, bam)
+    try:
+        pysam.sort("-o", new_name, bam)
+    except:
+        print_fail("[ERROR]: The file is not a bam file!")
+        exit(1)
 
 
 def index_bam(bam: str, new_name: str) -> None:
-    pysam.index(bam, new_name)
-
+    try:
+        pysam.index(bam, new_name)
+    except:
+        print_fail("[ERROR]: The file is not a bam file!")
+        exit(1)
+        
 
 def run_perbase(bam: str) -> _io.StringIO:
     return StringIO(
@@ -310,15 +317,15 @@ def process_dataframe(perbase, sort_and_index, index):
         print_fail("[ERROR]: Could not process dataframe")
         if not sort_and_index:
             print_warning(
-                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i'"
             )
             print_warning(
-                "[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s True'"
+                "[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s'"
             )
             exit(1)
         if not index:
             print_warning(
-                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i'"
             )
             exit(1)
 
