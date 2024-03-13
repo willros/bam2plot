@@ -27,7 +27,7 @@ class bcolors:
 def print_green(text):
     print(f"{bcolors.OKGREEN}{text}{bcolors.ENDC}")
 def print_warning(text):
-    print(f"{bcolors.WARNING}{bcolors.underline}{text}{bcolors.ENDC}")
+    print(f"{bcolors.WARNING}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
 def print_fail(text):
     print(f"{bcolors.FAIL}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
 def print_blue(text):
@@ -90,12 +90,12 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
 def print_coverage_info(df: pd.DataFrame, threshold: int) -> None:
     name = df.iloc[0].id
     print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
-    print_blue(f"[SUMMARIZE]: {np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
+    print_blue(f"   [SUMMARIZE]: {np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
     print_blue(
-        f"[SUMMARIZE]: {np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
+        f"   [SUMMARIZE]: {np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
     )
-    print_blue(f"[SUMMARIZE]: median coverage: {df['coverage'].median(): .0f}X")
-    print_blue(f"[SUMMARIZE]: mean coverage: {df['coverage'].mean(): .0f}X")
+    print_blue(f"   [SUMMARIZE]: median coverage: {df['coverage'].median(): .0f}X")
+    print_blue(f"   [SUMMARIZE]: mean coverage: {df['coverage'].mean(): .0f}X")
 
 
 def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
@@ -193,8 +193,7 @@ def make_dir(outpath: str) -> None:
         
 def cli():
     parser = argparse.ArgumentParser(
-        program="bam2plot",
-        description="Search for a word in Excel files within a folder."
+        description="Plot your bam files!"
     )
     parser.add_argument(
         "-b", "--bam", required=True, help="bam file"
@@ -207,6 +206,9 @@ def cli():
     )
     parser.add_argument(
         "-t", "--threshold", required=False, default=3, help="Threshold of mean coverage depth"
+    )
+    parser.add_argument(
+        "-r", "--rolling_window", required=False, default=10, help="Rolling window size"
     )
     parser.add_argument(
         "-i", "--index", required=False, default=False, help="Index bam file"
@@ -241,6 +243,9 @@ def cli():
     
     
 def if_sort_and_index(sort_and_index, index, bam):
+    if not sort_and_index and not index:
+        return run_perbase(bam)
+    
     if sort_and_index:
         print_green("[INFO]: Sorting bam file")
         sort_bam(bam, new_name=SORTED_TEMP)
@@ -266,7 +271,7 @@ def if_sort_and_index(sort_and_index, index, bam):
         if index:
             os.remove(index_name)
     
-    return perbase
+        return perbase
 
     
 def process_dataframe(perbase, sort_and_index, index):
@@ -274,7 +279,7 @@ def process_dataframe(perbase, sort_and_index, index):
         print_green("[INFO]: Processing dataframe")
         df = perbase_to_df(perbase)
     except:
-        print_fail("[ERROR]: COuld not process dataframe")
+        print_fail("[ERROR]: Could not process dataframe")
         if not sort_and_index:
             print_warning("[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
             print_warning("[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s True'")
@@ -365,7 +370,6 @@ def main(
         cum_plot.savefig(f"{cum_plot_name}.svg")
         print_green(f"[INFO]: Cumulative plot generated!")
         
-    print_green("[INFO]: Plots done!")
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
     exit(0)
 
