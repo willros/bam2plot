@@ -23,5 +23,5 @@ setuptools.setup(
         "pysam==0.22.0",
         "seaborn==0.13.2",
     ],
-    entry_points={"console_scripts": ["bam2plot=bam2plot.main:run"]},
+    entry_points={"console_scripts": ["bam2plot=bam2plot.main:cli"]},
 )
