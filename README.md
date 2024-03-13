@@ -39,6 +39,8 @@ Replace the placeholders with the following information:
 - `<window_size>`: Rolling window size for calculating the depth average (optional, default: 100).
 - `<coverage_threshold>`: Coverage threshold for plotting (optional, default: 3).
 - `<zoom>`: Region to zoom into. Example: "100 200" zooms into position 100-200. (optional, default: False)
+- `<log_scale>`: Whether to use a log scale on the Y axis of the plots. (optional, defualt: False) Example: `--log_scale=True`
+- `<cum_plot>`: Whether to plot cumulative coverage for all chromosomes or not. (optional, defualt: False) Example: `--cum_plot=True`
 
 ## Outputs
 
