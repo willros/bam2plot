@@ -13,6 +13,33 @@ import platform
 import pandas
 import matplotlib.ticker as mtick
 import numpy as np
+import argparse
+
+
+class bcolors:
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    UNDERLINE = "\033[4m"
+
+
+def print_green(text):
+    print(f"{bcolors.OKGREEN}{text}{bcolors.ENDC}")
+
+
+def print_warning(text):
+    print(f"{bcolors.WARNING}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
+
+
+def print_fail(text):
+    print(f"{bcolors.FAIL}{bcolors.UNDERLINE}{text}{bcolors.ENDC}")
+
+
+def print_blue(text):
+    print(f"{bcolors.OKBLUE}{text}{bcolors.ENDC}")
 
 
 # for windows users
@@ -70,13 +97,15 @@ def perbase_to_df(perbase: _io.StringIO) -> pd.DataFrame:
 
 def print_coverage_info(df: pd.DataFrame, threshold: int) -> None:
     name = df.iloc[0].id
-    print(f"Coverage information for: {name}")
-    print(f"{np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage")
-    print(
-        f"{np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
+    print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
+    print_blue(
+        f"   [SUMMARIZE]: {np.mean(df['coverage'] == 0) * 100: .2f}% bases with 0 coverage"
     )
-    print(f"median coverage: {df['coverage'].median(): .0f}X")
-    print(f"mean coverage: {df['coverage'].mean(): .0f}X")
+    print_blue(
+        f"   [SUMMARIZE]: {np.mean(df['coverage'] <= threshold) * 100: .2f}% bases with a coverage under {threshold}X"
+    )
+    print_blue(f"   [SUMMARIZE]: median coverage: {df['coverage'].median(): .0f}X")
+    print_blue(f"   [SUMMARIZE]: mean coverage: {df['coverage'].mean(): .0f}X")
 
 
 def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
@@ -84,9 +113,9 @@ def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
     coverage_over_threshold = (
         sum(1 if x > threshold else 0 for x in df.coverage) / df.shape[0] * 100
     )
-    print(f"Mean coverage of all basepairs: {mean_coverage: .1f}X")
-    print(
-        f"Percent bases with coverage above {threshold}X: {coverage_over_threshold: .1f}%"
+    print_blue(f"[SUMMARIZE]: Mean coverage of all basepairs: {mean_coverage: .1f}X")
+    print_blue(
+        f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {coverage_over_threshold: .1f}%"
     )
 
 
@@ -98,11 +127,9 @@ def plot_coverage(
     log_scale: bool = False,
 ) -> matplotlib.figure.Figure:
     if log_scale:
-        mpileup_df = (
-                mpileup_df
-                .assign(coverage=lambda x: np.log10(x.coverage + 1))
-                .assign(Depth=lambda x: np.log10(x.Depth + 1))
-        )
+        mpileup_df = mpileup_df.assign(
+            coverage=lambda x: np.log10(x.coverage + 1)
+        ).assign(Depth=lambda x: np.log10(x.Depth + 1))
         threshold = np.log10(threshold)
 
     mean_coverage = mpileup_df.coverage.mean()
@@ -171,91 +198,178 @@ def make_dir(outpath: str) -> None:
         outpath.mkdir(parents=True)
 
 
-def cli(
-    bam: str,
-    outpath: str = "",
-    whitelist: list = None,
-    rolling_window: int = 10,
-    threshold: int = 3,
-    index: bool = False,
-    sort_and_index: bool = False,
-    zoom: bool | str = False,
-    log_scale: bool = False,
-    cum_plot: bool = False,
+def cli():
+    parser = argparse.ArgumentParser(description="Plot your bam files!")
+    parser.add_argument("-b", "--bam", required=True, help="bam file")
+    parser.add_argument(
+        "-o",
+        "--outpath",
+        required=False,
+        default="bam2plots",
+        help="Where to save the plots.",
+    )
+    parser.add_argument(
+        "-w",
+        "--whitelist",
+        required=False,
+        default=None,
+        help="Only include these references/chromosomes.",
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        required=False,
+        default=3,
+        help="Threshold of mean coverage depth",
+    )
+    parser.add_argument(
+        "-r", "--rolling_window", required=False, default=10, help="Rolling window size"
+    )
+    parser.add_argument(
+        "-i", "--index", required=False, default=False, help="Index bam file"
+    )
+    parser.add_argument(
+        "-s",
+        "--sort_and_index",
+        required=False,
+        default=False,
+        help="Index and sort bam file",
+    )
+    parser.add_argument(
+        "-z",
+        "--zoom",
+        required=False,
+        default=False,
+        help="Zoom into this region. Example: -z='100 2000'",
+    )
+    parser.add_argument(
+        "-l", "--log_scale", required=False, default=False, help="Log scale of Y axis"
+    )
+    parser.add_argument(
+        "-c",
+        "--cum_plot",
+        required=False,
+        default=False,
+        help="Generate cumulative plots of all chromosomes",
+    )
+
+    args = parser.parse_args()
+
+    main(
+        bam=args.bam,
+        outpath=args.outpath,
+        whitelist=args.whitelist,
+        rolling_window=args.rolling_window,
+        threshold=args.threshold,
+        index=args.index,
+        sort_and_index=args.sort_and_index,
+        zoom=args.zoom,
+        log_scale=args.log_scale,
+        cum_plot=args.cum_plot,
+    )
+
+
+def if_sort_and_index(sort_and_index, index, bam):
+    if not sort_and_index and not index:
+        return run_perbase(bam)
+
+    if sort_and_index:
+        print_green("[INFO]: Sorting bam file")
+        sort_bam(bam, new_name=SORTED_TEMP)
+        print_green("[INFO]: Indexing bam file")
+        index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
+    if index:
+        print_green("[INFO]: Indexing bam file")
+        index_name = f"{bam}.bai"
+        index_bam(bam, new_name=index_name)
+
+    try:
+        if sort_and_index:
+            perbase = run_perbase(SORTED_TEMP)
+        if index:
+            perbase = run_perbase(bam)
+    except:
+        print_fail("[ERROR]: Could not run perbase on bam file")
+        exit(1)
+    finally:
+        if sort_and_index:
+            os.remove(SORTED_TEMP)
+            os.remove(SORTED_TEMP_INDEX)
+        if index:
+            os.remove(index_name)
+
+        return perbase
+
+
+def process_dataframe(perbase, sort_and_index, index):
+    try:
+        print_green("[INFO]: Processing dataframe")
+        df = perbase_to_df(perbase)
+    except:
+        print_fail("[ERROR]: Could not process dataframe")
+        if not sort_and_index:
+            print_warning(
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+            )
+            print_warning(
+                "[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s True'"
+            )
+            exit(1)
+        if not index:
+            print_warning(
+                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i True'"
+            )
+            exit(1)
+
+    return df
+
+
+def main(
+    bam,
+    outpath,
+    whitelist,
+    rolling_window,
+    threshold,
+    index,
+    sort_and_index,
+    zoom,
+    log_scale,
+    cum_plot,
 ) -> None:
+    print_green(f"[INFO]: Running bam2plot on {bam}!")
     if zoom:
         start = int(zoom.split(" ")[0])
         end = int(zoom.split(" ")[1])
         if start >= end:
-            print("Start value of zoom must be lower than end value.")
+            print_fail("[ERROR]: Start value of zoom must be lower than end value.")
             exit(1)
 
     if not Path(bam).exists():
-        print(f"The file {bam} does not exist")
+        print_fail(f"[ERROR]: The file {bam} does not exist")
         exit(1)
 
-    if outpath == "":
-        outpath = "bam2plot"
-        make_dir(outpath)
-    else:
-        make_dir(outpath)
-
+    make_dir(outpath)
     sample_name = Path(bam).stem
 
-    if sort_and_index:
-        print("Sorting bam file")
-        sort_bam(bam, new_name=SORTED_TEMP)
-        print("Indexing bam file")
-        index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
-        perbase = run_perbase(SORTED_TEMP)
-        os.remove(SORTED_TEMP)
-        os.remove(SORTED_TEMP_INDEX)
-    else:
-        if index:
-            print("Indexing bam file")
-            index_name = f"{bam}.bai"
-            index_bam(bam, new_name=index_name)
-        perbase = run_perbase(bam)
-        if index:
-            os.remove(index_name)
+    perbase = if_sort_and_index(sort_and_index, index, bam)
 
-    try:
-        print("-----------------------------")
-        print("Processing dataframe")
-        df = perbase_to_df(perbase)
-    except pandas.errors.EmptyDataError as e:
-        print("Error while processing bam")
-        if not sort_and_index:
-            print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
-            print("Is the file sorted? If not, run 'bam2plot <file.bam> -s True'")
-            exit(1)
-        if not index:
-            print("Is the file indexed? If not, run 'bam2plot <file.bam> -i True'")
-            exit(1)
-    print("-----------------------------")
-    print("")
+    df = process_dataframe(perbase, sort_and_index, index)
 
-    print("-----------------------------")
-    # Average coverage for total reference
     print_total_reference_info(df, threshold)
-    print("-----------------------------")
-    print("")
 
-    print("-----------------------------")
-    # filter the df to wanted ref or chromosomes:
     if whitelist:
         whitelist = [whitelist] if type(whitelist) == str else whitelist
-        print(f"Only looking for references in the whitelist: {whitelist}")
+        print_green(
+            f"[INFO]: Only looking for references in the whitelist: {whitelist}"
+        )
         df = df.loc[lambda x: x.id.isin(whitelist)]
 
     plot_number = df.id.nunique()
     if plot_number == 0:
-        print("No reference to plot against!")
+        print_fail("[ERROR]: No reference to plot against!")
         exit(1)
 
-    print(f"Generating {plot_number} plots:")
-    print("-----------------------------")
-    print("")
+    print_green(f"[INFO]: Generating {plot_number} plots:")
     out_file = f"{outpath}/{sample_name}_bam2plot"
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
@@ -264,52 +378,41 @@ def cli(
         if zoom:
             mpileup_df = mpileup_df.loc[lambda x: x.Position.between(start, end)]
             if mpileup_df.shape[0] == 0:
-                print("No positions to plot after zoom")
+                print_warning("[WARNING]: No positions to plot after zoom")
                 continue
-                #exit(1)
-                
-        if mpileup_df.shape[0] == 0:
-            print("No positions to plot")
-            continue
-            #exit(1)
 
-        print("-----------------------------")
+        if mpileup_df.shape[0] == 0:
+            print_warning("[WARNING]: No positions to plot")
+            continue
+
         print_coverage_info(mpileup_df, threshold)
 
         plot = plot_coverage(
-            mpileup_df, sample_name, threshold=threshold, rolling_window=rolling_window, log_scale=log_scale
+            mpileup_df,
+            sample_name,
+            threshold=threshold,
+            rolling_window=rolling_window,
+            log_scale=log_scale,
         )
 
         name = f"{out_file}_{reference}"
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
-        print(f"Plot for {reference} generated")
-        print("-----------------------------")
-        print("")
+        print_green(f"[INFO]: Plot for {reference} generated")
 
-    print("-----------------------------")
-    print("Coverage plots done!")
-    print("-----------------------------")
-    print("")
+    print_green("[INFO]: Coverage plots done!")
 
-    print("-----------------------------")
     if cum_plot:
-        print("Generating cumulative coverage plots for each reference")
+        print_green("[INFO]: Generating cumulative coverage plots for each reference")
         cum_plot = plot_cumulative_coverage_for_all(df)
         cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
         cum_plot.savefig(f"{cum_plot_name}.png")
         cum_plot.savefig(f"{cum_plot_name}.svg")
-        print(f"Cumulative plot generated!")
-        print("-----------------------------")
-        print("")
+        print_green(f"[INFO]: Cumulative plot generated!")
 
-    print("-----------------------------")
-    print("Plots done!")
-    print(f"Plots location: {Path(outpath).resolve()}")
-    print("-----------------------------")
-    print("")
+    print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
     exit(0)
 
 
-def run() -> None:
-    fire.Fire(cli)
+if __name__ == "__main__":
+    cli()
