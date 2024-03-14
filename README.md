@@ -8,6 +8,8 @@ bam2plot generates coverage plots:
 ... and cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
 ![plot](example/cumplot.png)
 
+If the flag `--highlight` is given, the regions with a coverage below the `--treshold` are highlighted:
+![plot](example/highlight.png)
 
 ## Dependencies
 `bam2plot` depends on `perbase`, which you can install via:
@@ -29,8 +31,8 @@ Once installed, you can use the `bam2plot` command to perform coverage analysis 
 
 ```bash
 usage: bam2plot [-h] -b BAM [-o OUTPATH] [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW] [-i | --index | --no-index]
-                [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM] [-l | --log_scale | --no-log_scale]
-                [-c | --cum_plot | --no-cum_plot]
+                [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM] [-l | --log_scale | --no-log_scale] [-c | --cum_plot | --no-cum_plot]
+                [-hl | --highlight | --no-highlight]
 
 Plot your bam files!
 
@@ -54,6 +56,8 @@ options:
                         Log scale of Y axis (default: False)
   -c, --cum_plot, --no-cum_plot
                         Generate cumulative plots of all chromosomes (default: False)
+  -hl, --highlight, --no-highlight
+                        Highlights regions where coverage is below treshold. (default: False)
 ```
 
 ## Outputs
@@ -65,5 +69,5 @@ The BAM2Plot package generates coverage plots for each reference sequence in the
 Here's an example of how to use the BAM2Plot package:
 
 ```bash
-bam2plot --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c
+bam2plot --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c -hl
 ```
