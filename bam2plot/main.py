@@ -109,24 +109,24 @@ def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
     print_blue(
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {coverage_over_threshold: .1f}%"
     )
-    
-    
+
+
 def under_threshold(df, threshold):
     df = df.assign(zero=lambda x: x.coverage < threshold)
-    
+
     start = []
     stop = []
-    
+
     start_value = False
     for row in df.itertuples():
         if row.zero and not start_value:
             start_value = True
             start.append(row.Position)
-        
+
         if not row.zero and start_value:
             start_value = False
             stop.append(row.Position)
-        
+
     if len(start) > len(stop):
         stop.append(df.Position.max())
     return zip(start, stop)
@@ -164,13 +164,13 @@ def plot_coverage(
         f"Percent bases with coverage above {threshold}X: {coverage: .1f}% | Rolling window: {rolling_window} nt"
     )
     plt.suptitle(f"Ref: {mpileup_df.iloc[0].id} | Sample: {sample_name}")
-    
+
     if highlight:
-        for a,b in under_threshold(mpileup_df, threshold):
-            plt.fill_between([a, b], 0, mean_coverage, color='red', alpha=0.2)
-            
+        for a, b in under_threshold(mpileup_df, threshold):
+            plt.fill_between([a, b], 0, mean_coverage, color="red", alpha=0.2)
+
     plt.close()
-    
+
     return coverage_plot
 
 
@@ -247,7 +247,12 @@ def cli():
         type=int,
     )
     parser.add_argument(
-        "-r", "--rolling_window", required=False, default=100, help="Rolling window size", type=int
+        "-r",
+        "--rolling_window",
+        required=False,
+        default=100,
+        help="Rolling window size",
+        type=int,
     )
     parser.add_argument(
         "-i",
@@ -379,36 +384,38 @@ def process_dataframe(perbase, sort_and_index, index):
 
     return df
 
+
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
     out_file = f"{outpath}/{sample_name}_bam2plot"
     name = f"{out_file}_{reference}"
-    
+
     if plot_type == "png":
         plot.savefig(f"{name}.png")
-        
+
     if plot_type == "svg":
         plot.savefig(f"{name}.svg")
-        
+
     if plot_type == "both":
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
-        
+
     print_green(f"[INFO]: Plot for {reference} generated")
-    
+
+
 def save_plot_cum(cum_plot, outpath, bam, plot_type):
     cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
     print_green(f"[INFO]: Cumulative plot generated!")
-    
+
     if plot_type == "png":
         cum_plot.savefig(f"{cum_plot_name}.png")
-        
+
     if plot_type == "svg":
         cum_plot.savefig(f"{cum_plot_name}.svg")
-        
+
     if plot_type == "both":
         cum_plot.savefig(f"{cum_plot_name}.png")
         cum_plot.savefig(f"{cum_plot_name}.svg")
-        
+
     print_green(f"[INFO]: Cumulative plot generated!")
 
 
@@ -485,7 +492,7 @@ def main(
             log_scale=log_scale,
             highlight=highlight,
         )
-        
+
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
