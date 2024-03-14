@@ -77,16 +77,13 @@ def run_perbase(bam: str) -> _io.StringIO:
     )
 
 
-
 def perbase_to_df(perbase: _io.StringIO) -> pl.DataFrame:
     return (
         pl.read_csv(
             perbase,
             separator="\t",
         )
-        .with_columns(
-            pos=pl.int_ranges("POS", "END")
-        )
+        .with_columns(pos=pl.int_ranges("POS", "END"))
         .explode("pos")
         .rename({"DEPTH": "depth", "REF": "ref"})
         .select(["ref", "pos", "depth"])
@@ -95,76 +92,55 @@ def perbase_to_df(perbase: _io.StringIO) -> pl.DataFrame:
 
 def print_coverage_info(df, threshold: int) -> None:
     name = df["ref"][0]
-    over_zero = (
-        df
-        .with_columns(over_zero=pl.col("depth") > 0)
-        ["over_zero"].mean()
-        * 100
-    )
+    over_zero = df.with_columns(over_zero=pl.col("depth") > 0)["over_zero"].mean() * 100
     over_treshold = (
-        df
-        .with_columns(over_t=pl.col("depth") > threshold)
-        ["over_t"].mean()
-        * 100
+        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
     )
     print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
-    
-    print_blue(
-        f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%"
-    )
-    
+
+    print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
+
     print_blue(
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
     )
-    
+
     print_blue(f"   [SUMMARIZE]: median coverage: {df['depth'].median(): .0f}X")
     print_blue(f"   [SUMMARIZE]: mean coverage: {df['depth'].mean(): .0f}X")
 
 
 def print_total_reference_info(df, threshold: int) -> None:
     mean_coverage = df["depth"].mean()
-    
-    over_zero = (
-        df
-        .with_columns(over_zero=pl.col("depth") > 0)
-        ["over_zero"].mean()
-        * 100
-    )
+
+    over_zero = df.with_columns(over_zero=pl.col("depth") > 0)["over_zero"].mean() * 100
     over_treshold = (
-        df
-        .with_columns(over_t=pl.col("depth") > threshold)
-        ["over_t"].mean()
-        * 100
+        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
     )
-    
-    
+
     print_blue(f"[SUMMARIZE]: Mean coverage of all basepairs: {mean_coverage: .1f}X")
-    
-    print_blue(
-        f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%"
-    )
-    
+
+    print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
+
     print_blue(
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
     )
-    
-    
+
+
 def under_threshold(df, threshold):
     df = df.assign(zero=lambda x: x.depth < threshold)
-    
+
     start = []
     stop = []
-    
+
     start_value = False
     for row in df.itertuples():
         if row.zero and not start_value:
             start_value = True
             start.append(row.pos)
-        
+
         if not row.zero and start_value:
             start_value = False
             stop.append(row.pos)
-        
+
     if len(start) > len(stop):
         stop.append(df.pos.max())
     return start, stop
@@ -179,23 +155,18 @@ def plot_coverage(
     highlight: bool = False,
 ) -> matplotlib.figure.Figure:
     if log_scale:
-        df = (
-            df
-            .with_columns(depth=(pl.col("depth") + 1).log10())
-            .with_columns(rolling=(pl.col("depth") + 1).log10())
+        df = df.with_columns(depth=(pl.col("depth") + 1).log10()).with_columns(
+            rolling=(pl.col("depth") + 1).log10()
         )
-        
+
         threshold = np.log10(threshold)
 
     mean_coverage = df["depth"].mean()
-    
+
     over_treshold = (
-        df
-        .with_columns(over_t=pl.col("depth") > threshold)
-        ["over_t"].mean()
-        * 100
+        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
     )
-    
+
     df = df.to_pandas()
 
     coverage_plot = plt.figure(figsize=(15, 8))
@@ -212,25 +183,20 @@ def plot_coverage(
     ax.set(xlabel="Position", ylabel="Depth")
 
     if highlight:
-        for a,b in zip(*under_threshold(df, threshold)):
-            plt.fill_between([a, b], 0, mean_coverage, color='red', alpha=0.2)
-            
+        for a, b in zip(*under_threshold(df, threshold)):
+            plt.fill_between([a, b], 0, mean_coverage, color="red", alpha=0.2)
+
     plt.close()
-    
+
     return coverage_plot
 
 
 def coverage_for_value(df, coverage: int):
     number_of_bases = df["pos"].max()
     _id = df["ref"][0][:20]
-    
-    percent = (
-        df
-        .with_columns(over_t=pl.col("depth") > coverage)
-        ["over_t"].mean()
-        * 100
-    )
-    
+
+    percent = df.with_columns(over_t=pl.col("depth") > coverage)["over_t"].mean() * 100
+
     return pl.DataFrame(
         {
             "coverage": [coverage],
@@ -254,9 +220,7 @@ def plot_cumulative_coverage_for_all(df):
 
     all_coverage = pl.concat(
         [
-            coverage_for_many_values(
-                df.filter(pl.col("ref") == ref), coverage_values
-            )
+            coverage_for_many_values(df.filter(pl.col("ref") == ref), coverage_values)
             for ref in df["ref"].unique()
         ]
     )
@@ -265,6 +229,7 @@ def plot_cumulative_coverage_for_all(df):
     grid.map_dataframe(sns.lineplot, x="coverage", y="percent")
     plt.close()
     return grid.fig
+
 
 def make_dir(outpath: str) -> None:
     outpath = Path(outpath)
@@ -298,7 +263,12 @@ def cli():
         type=int,
     )
     parser.add_argument(
-        "-r", "--rolling_window", required=False, default=100, help="Rolling window size", type=int
+        "-r",
+        "--rolling_window",
+        required=False,
+        default=100,
+        help="Rolling window size",
+        type=int,
     )
     parser.add_argument(
         "-i",
@@ -430,36 +400,38 @@ def process_dataframe(perbase, sort_and_index, index):
 
     return df
 
+
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
     out_file = f"{outpath}/{sample_name}_bam2plot"
     name = f"{out_file}_{reference}"
-    
+
     if plot_type == "png":
         plot.savefig(f"{name}.png")
-        
+
     if plot_type == "svg":
         plot.savefig(f"{name}.svg")
-        
+
     if plot_type == "both":
         plot.savefig(f"{name}.svg")
         plot.savefig(f"{name}.png")
-        
+
     print_green(f"[INFO]: Plot for {reference} generated")
-    
+
+
 def save_plot_cum(cum_plot, outpath, bam, plot_type):
     cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
     print_green(f"[INFO]: Cumulative plot generated!")
-    
+
     if plot_type == "png":
         cum_plot.savefig(f"{cum_plot_name}.png")
-        
+
     if plot_type == "svg":
         cum_plot.savefig(f"{cum_plot_name}.svg")
-        
+
     if plot_type == "both":
         cum_plot.savefig(f"{cum_plot_name}.png")
         cum_plot.savefig(f"{cum_plot_name}.svg")
-        
+
     print_green(f"[INFO]: Cumulative plot generated!")
 
 
@@ -505,7 +477,6 @@ def main(
         )
         df = df.filter(pl.col("ref").is_in(whitelist))
 
-
     plot_number = df["ref"].n_unique()
     if plot_number == 0:
         print_fail("[ERROR]: No reference to plot against!")
@@ -513,14 +484,12 @@ def main(
 
     plot_text = "plot" if plot_number == 1 else "plots"
     print_green(f"[INFO]: Generating {plot_number} {plot_text}:")
-    
+
     for reference in df["ref"].unique():
-        mpileup_df = (
-            df
-            .filter(pl.col("ref") == reference)
-            .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
+        mpileup_df = df.filter(pl.col("ref") == reference).with_columns(
+            rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
         )
-        
+
         if zoom:
             mpileup_df = mpileup_df.filter(pl.col("pos").is_between(start, end))
             if mpileup_df.shape[0] == 0:
@@ -541,7 +510,7 @@ def main(
             log_scale=log_scale,
             highlight=highlight,
         )
-        
+
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
