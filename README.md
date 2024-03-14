@@ -11,6 +11,9 @@ bam2plot generates coverage plots:
 If the flag `--highlight` is given, the regions with a coverage below the `--treshold` are highlighted:
 ![plot](example/highlight.png)
 
+Below is an example of how bam2plot looks when runned in the terminal:
+![plot](example/running.png)
+
 ## Dependencies
 `bam2plot` depends on `perbase`, which you can install via:
 ```bash
