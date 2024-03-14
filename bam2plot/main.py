@@ -296,8 +296,18 @@ def cli():
         help="Highlights regions where coverage is below treshold.",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "-p",
+        "--plot_type",
+        required=False,
+        default="png",
+        choices=["png", "svg", "both"],
+        help="How to save the plots",
+    )
 
     args = parser.parse_args()
+    command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
+    print_green(command)
 
     main(
         bam=args.bam,
@@ -311,6 +321,7 @@ def cli():
         log_scale=args.log_scale,
         cum_plot=args.cum_plot,
         highlight=args.highlight,
+        plot_type=args.plot_type,
     )
 
 
@@ -368,6 +379,38 @@ def process_dataframe(perbase, sort_and_index, index):
 
     return df
 
+def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
+    out_file = f"{outpath}/{sample_name}_bam2plot"
+    name = f"{out_file}_{reference}"
+    
+    if plot_type == "png":
+        plot.savefig(f"{name}.png")
+        
+    if plot_type == "svg":
+        plot.savefig(f"{name}.svg")
+        
+    if plot_type == "both":
+        plot.savefig(f"{name}.svg")
+        plot.savefig(f"{name}.png")
+        
+    print_green(f"[INFO]: Plot for {reference} generated")
+    
+def save_plot_cum(cum_plot, outpath, bam, plot_type):
+    cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
+    print_green(f"[INFO]: Cumulative plot generated!")
+    
+    if plot_type == "png":
+        cum_plot.savefig(f"{cum_plot_name}.png")
+        
+    if plot_type == "svg":
+        cum_plot.savefig(f"{cum_plot_name}.svg")
+        
+    if plot_type == "both":
+        cum_plot.savefig(f"{cum_plot_name}.png")
+        cum_plot.savefig(f"{cum_plot_name}.svg")
+        
+    print_green(f"[INFO]: Cumulative plot generated!")
+
 
 def main(
     bam,
@@ -381,6 +424,7 @@ def main(
     log_scale,
     cum_plot,
     highlight,
+    plot_type,
 ) -> None:
     print_green(f"[INFO]: Running bam2plot on {bam}!")
     if zoom:
@@ -417,7 +461,6 @@ def main(
 
     plot_text = "plot" if plot_number == 1 else "plots"
     print_green(f"[INFO]: Generating {plot_number} {plot_text}:")
-    out_file = f"{outpath}/{sample_name}_bam2plot"
     for reference in df.id.unique():
         mpileup_df = df.loc[lambda x: x.id == reference].assign(
             Depth=lambda x: x.coverage.rolling(rolling_window).mean()
@@ -442,21 +485,15 @@ def main(
             log_scale=log_scale,
             highlight=highlight,
         )
-
-        name = f"{out_file}_{reference}"
-        plot.savefig(f"{name}.svg")
-        plot.savefig(f"{name}.png")
-        print_green(f"[INFO]: Plot for {reference} generated")
+        
+        save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
 
     if cum_plot:
         print_green("[INFO]: Generating cumulative coverage plots for each reference")
         cum_plot = plot_cumulative_coverage_for_all(df)
-        cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
-        cum_plot.savefig(f"{cum_plot_name}.png")
-        cum_plot.savefig(f"{cum_plot_name}.svg")
-        print_green(f"[INFO]: Cumulative plot generated!")
+        save_plot_cum(cum_plot, outpath, bam, plot_type)
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
     exit(0)
