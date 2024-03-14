@@ -3,9 +3,9 @@
 Plot your bam files!
 
 bam2plot generates coverage plots:
-![plot](example/example.png)
+![plot](example/normal.png)
 
-... and cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
+... and if `-c` is added, cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
 ![plot](example/cumplot.png)
 
 If the flag `--highlight` is given, the regions with a coverage below the `--treshold` are highlighted:
