@@ -63,7 +63,7 @@ def index_bam(bam: str, new_name: str) -> None:
     try:
         pysam.index(bam, new_name)
     except:
-        print_fail("[ERROR]: The file is not a bam file!")
+        print_fail("[ERROR]: The file is not sorted! Run 'bam2plot <bam> -s'")
         exit(1)
 
 
@@ -109,6 +109,27 @@ def print_total_reference_info(df: pd.DataFrame, threshold: int) -> None:
     print_blue(
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {coverage_over_threshold: .1f}%"
     )
+    
+    
+def under_threshold(df, threshold):
+    df = df.assign(zero=lambda x: x.coverage < threshold)
+    
+    start = []
+    stop = []
+    
+    start_value = False
+    for row in df.itertuples():
+        if row.zero and not start_value:
+            start_value = True
+            start.append(row.Position)
+        
+        if not row.zero and start_value:
+            start_value = False
+            stop.append(row.Position)
+        
+    if len(start) > len(stop):
+        stop.append(df.Position.max())
+    return zip(start, stop)
 
 
 def plot_coverage(
@@ -117,6 +138,7 @@ def plot_coverage(
     threshold: int,
     rolling_window: int,
     log_scale: bool = False,
+    highlight: bool = False,
 ) -> matplotlib.figure.Figure:
     if log_scale:
         mpileup_df = mpileup_df.assign(
@@ -142,7 +164,13 @@ def plot_coverage(
         f"Percent bases with coverage above {threshold}X: {coverage: .1f}% | Rolling window: {rolling_window} nt"
     )
     plt.suptitle(f"Ref: {mpileup_df.iloc[0].id} | Sample: {sample_name}")
+    
+    if highlight:
+        for a,b in under_threshold(mpileup_df, threshold):
+            plt.fill_between([a, b], 0, mean_coverage, color='red', alpha=0.2)
+            
     plt.close()
+    
     return coverage_plot
 
 
@@ -219,7 +247,7 @@ def cli():
         type=int,
     )
     parser.add_argument(
-        "-r", "--rolling_window", required=False, default=10, help="Rolling window size"
+        "-r", "--rolling_window", required=False, default=100, help="Rolling window size", type=int
     )
     parser.add_argument(
         "-i",
@@ -260,6 +288,14 @@ def cli():
         help="Generate cumulative plots of all chromosomes",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "-hl",
+        "--highlight",
+        required=False,
+        default=False,
+        help="Highlights regions where coverage is below treshold.",
+        action=argparse.BooleanOptionalAction,
+    )
 
     args = parser.parse_args()
 
@@ -274,6 +310,7 @@ def cli():
         zoom=args.zoom,
         log_scale=args.log_scale,
         cum_plot=args.cum_plot,
+        highlight=args.highlight,
     )
 
 
@@ -343,6 +380,7 @@ def main(
     zoom,
     log_scale,
     cum_plot,
+    highlight,
 ) -> None:
     print_green(f"[INFO]: Running bam2plot on {bam}!")
     if zoom:
@@ -402,6 +440,7 @@ def main(
             threshold=threshold,
             rolling_window=rolling_window,
             log_scale=log_scale,
+            highlight=highlight,
         )
 
         name = f"{out_file}_{reference}"
