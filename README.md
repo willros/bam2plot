@@ -33,9 +33,10 @@ pip install bam2plot
 Once installed, you can use the `bam2plot` command to perform coverage analysis on BAM files and generate coverage plots. Here's how to use it:
 
 ```bash
-usage: bam2plot [-h] -b BAM [-o OUTPATH] [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW] [-i | --index | --no-index]
-                [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM] [-l | --log_scale | --no-log_scale] [-c | --cum_plot | --no-cum_plot]
-                [-hl | --highlight | --no-highlight]
+usage: bam2plot [-h] -b BAM [-o OUTPATH] [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW]
+                [-i | --index | --no-index] [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM]
+                [-l | --log_scale | --no-log_scale] [-c | --cum_plot | --no-cum_plot]
+                [-hl | --highlight | --no-highlight] [-p {png,svg,both}]
 
 Plot your bam files!
 
@@ -61,6 +62,8 @@ options:
                         Generate cumulative plots of all chromosomes (default: False)
   -hl, --highlight, --no-highlight
                         Highlights regions where coverage is below treshold. (default: False)
+  -p {png,svg,both}, --plot_type {png,svg,both}
+                        How to save the plots
 ```
 
 ## Outputs
