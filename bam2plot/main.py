@@ -77,25 +77,42 @@ def run_perbase(bam: str) -> _io.StringIO:
     )
 
 
-def perbase_to_df(perbase: _io.StringIO) -> pl.DataFrame:
+def perbase_to_df(perbase: _io.StringIO, threshold) -> pl.DataFrame:
     return (
-        pl.read_csv(
-            perbase,
-            separator="\t",
+        pl.read_csv(perbase, separator="\t")
+        .rename({"DEPTH": "depth", "REF": "ref", "END": "end", "POS": "pos"})
+        .with_columns(n_bases=(pl.col("end") - pl.col("pos")))
+        .with_columns(
+            over_zero=pl.when(pl.col("depth") == 0).then(pl.col("n_bases")).otherwise(0)
         )
-        .with_columns(pos=pl.int_ranges("POS", "END"))
-        .explode("pos")
-        .rename({"DEPTH": "depth", "REF": "ref"})
-        .select(["ref", "pos", "depth"])
+        .with_columns(
+            over_t=pl.when(pl.col("depth") > threshold)
+            .then(pl.col("n_bases"))
+            .otherwise(0)
+        )
     )
+
+
+def calculate_mean_coverage(df):
+    mean_coverage = df.with_columns(w=(pl.col("depth") * pl.col("n_bases")))
+
+    return mean_coverage["w"].sum() / mean_coverage["n_bases"].sum()
+
+
+def calculate_is_zero(df):
+    return df["over_zero"].sum() / df["n_bases"].sum() * 100
+
+
+def calculate_over_treshold(df):
+    return df["over_t"].sum() / df["n_bases"].sum() * 100
 
 
 def print_coverage_info(df, threshold: int) -> None:
     name = df["ref"][0]
-    over_zero = df.with_columns(over_zero=pl.col("depth") > 0)["over_zero"].mean() * 100
-    over_treshold = (
-        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
-    )
+
+    over_zero = 100 - calculate_is_zero(df)
+    over_treshold = calculate_over_treshold(df)
+    mean_coverage = calculate_mean_coverage(df)
     print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
 
     print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
@@ -104,22 +121,16 @@ def print_coverage_info(df, threshold: int) -> None:
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
     )
 
-    print_blue(f"   [SUMMARIZE]: median coverage: {df['depth'].median(): .0f}X")
-    print_blue(f"   [SUMMARIZE]: mean coverage: {df['depth'].mean(): .0f}X")
+    print_blue(f"   [SUMMARIZE]: mean coverage: {mean_coverage: .0f}X")
 
 
 def print_total_reference_info(df, threshold: int) -> None:
-    mean_coverage = df["depth"].mean()
-
-    over_zero = df.with_columns(over_zero=pl.col("depth") > 0)["over_zero"].mean() * 100
-    over_treshold = (
-        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
-    )
+    mean_coverage = calculate_mean_coverage(df)
+    over_zero = 100 - calculate_is_zero(df)
+    over_treshold = calculate_over_treshold(df)
 
     print_blue(f"[SUMMARIZE]: Mean coverage of all basepairs: {mean_coverage: .1f}X")
-
     print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
-
     print_blue(
         f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
     )
@@ -161,11 +172,9 @@ def plot_coverage(
 
         threshold = np.log10(threshold)
 
-    mean_coverage = df["depth"].mean()
+    mean_coverage = calculate_mean_coverage(df)
 
-    over_treshold = (
-        df.with_columns(over_t=pl.col("depth") > threshold)["over_t"].mean() * 100
-    )
+    over_treshold = calculate_over_treshold(df)
 
     df = df.to_pandas()
 
@@ -195,7 +204,11 @@ def coverage_for_value(df, coverage: int):
     number_of_bases = df["pos"].max()
     _id = df["ref"][0][:20]
 
-    percent = df.with_columns(over_t=pl.col("depth") > coverage)["over_t"].mean() * 100
+    percent_df = df.with_columns(
+        over_t=pl.when(pl.col("depth") > coverage).then(pl.col("n_bases")).otherwise(0)
+    )
+
+    percent = percent_df["over_t"].sum() / number_of_bases * 100
 
     return pl.DataFrame(
         {
@@ -266,7 +279,7 @@ def cli():
         "-r",
         "--rolling_window",
         required=False,
-        default=100,
+        default=10,
         help="Rolling window size",
         type=int,
     )
@@ -378,10 +391,10 @@ def if_sort_and_index(sort_and_index, index, bam):
         return perbase
 
 
-def process_dataframe(perbase, sort_and_index, index):
+def process_dataframe(perbase, sort_and_index, index, threshold):
     try:
         print_green("[INFO]: Processing dataframe")
-        df = perbase_to_df(perbase)
+        df = perbase_to_df(perbase, threshold)
     except:
         print_fail("[ERROR]: Could not process dataframe")
         if not sort_and_index:
@@ -466,7 +479,7 @@ def main(
 
     perbase = if_sort_and_index(sort_and_index, index, bam)
 
-    df = process_dataframe(perbase, sort_and_index, index)
+    df = process_dataframe(perbase, sort_and_index, index, threshold)
 
     print_total_reference_info(df, threshold)
 
