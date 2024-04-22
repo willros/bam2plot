@@ -81,7 +81,7 @@ def run_perbase(bam: str) -> _io.StringIO:
 
 def perbase_to_df(perbase: _io.StringIO, threshold) -> pl.DataFrame:
     return (
-        pl.read_csv(perbase, separator="\t")
+        pl.read_csv(perbase, separator="\t", dtypes={"REF": str})
         .rename({"DEPTH": "depth", "REF": "ref", "END": "end", "POS": "pos"})
         .with_columns(n_bases=(pl.col("end") - pl.col("pos")))
         .with_columns(
