@@ -72,7 +72,9 @@ def index_bam(bam: str, new_name: str) -> None:
 def run_perbase(bam: str) -> _io.StringIO:
     return StringIO(
         subprocess.check_output(
-            f"perbase only-depth --keep-zeros {bam}", shell=True, stderr=subprocess.DEVNULL
+            f"perbase only-depth --keep-zeros {bam}",
+            shell=True,
+            stderr=subprocess.DEVNULL,
         ).decode(errors="ignore")
     )
 
@@ -396,23 +398,13 @@ def process_dataframe(perbase, sort_and_index, index, threshold):
         print_green("[INFO]: Processing dataframe")
         df = perbase_to_df(perbase, threshold)
         return df
-    except:
-        print_fail("[ERROR]: Could not process dataframe")
-        if not sort_and_index:
+    except Exception as e:
+        print_fail(f"[ERROR]: Could not process dataframe: {str(e)}")
+        if not (sort_and_index or index):
             print_warning(
-                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i'"
+                "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
             )
-            print_warning(
-                "[WARNING]: Is the file sorted? If not, run 'bam2plot <file.bam> -s'"
-            )
-            exit(1)
-        if not index:
-            print_warning(
-                "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i'"
-            )
-            exit(1)
-        exit(1)
-
+        raise RuntimeError("Dataframe processing failed due to an error.") from e
 
 
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
