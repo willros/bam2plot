@@ -72,7 +72,7 @@ def index_bam(bam: str, new_name: str) -> None:
 def run_perbase(bam: str) -> _io.StringIO:
     return StringIO(
         subprocess.check_output(
-            f"perbase only-depth {bam}", shell=True, stderr=subprocess.DEVNULL
+            f"perbase only-depth --keep-zeros {bam}", shell=True, stderr=subprocess.DEVNULL
         ).decode(errors="ignore")
     )
 
@@ -395,6 +395,7 @@ def process_dataframe(perbase, sort_and_index, index, threshold):
     try:
         print_green("[INFO]: Processing dataframe")
         df = perbase_to_df(perbase, threshold)
+        return df
     except:
         print_fail("[ERROR]: Could not process dataframe")
         if not sort_and_index:
@@ -410,8 +411,8 @@ def process_dataframe(perbase, sort_and_index, index, threshold):
                 "[WARNING]: Is the file indexed? If not, run 'bam2plot <file.bam> -i'"
             )
             exit(1)
+        exit(1)
 
-    return df
 
 
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
