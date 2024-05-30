@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
 import pysam
-import pandas as pd
+import sys
 from io import StringIO
 import _io
 import seaborn as sns
@@ -139,23 +139,23 @@ def print_total_reference_info(df, threshold: int) -> None:
 
 
 def under_threshold(df, threshold):
-    df = df.assign(zero=lambda x: x.depth < threshold)
+    df = df.with_columns(zero=pl.col("depth") < threshold)
 
     start = []
     stop = []
 
     start_value = False
-    for row in df.itertuples():
-        if row.zero and not start_value:
+    for row in df.iter_rows(named=True):
+        if row["zero"] and not start_value:
             start_value = True
-            start.append(row.pos)
+            start.append(row["pos"])
 
-        if not row.zero and start_value:
+        if not row["zero"] and start_value:
             start_value = False
-            stop.append(row.pos)
+            stop.append(row["pos"])
 
     if len(start) > len(stop):
-        stop.append(df.pos.max())
+        stop.append(df["pos"].max())
     return start, stop
 
 
@@ -169,7 +169,7 @@ def plot_coverage(
 ) -> matplotlib.figure.Figure:
     if log_scale:
         df = df.with_columns(depth=(pl.col("depth") + 1).log10()).with_columns(
-            rolling=(pl.col("depth") + 1).log10()
+                rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
         )
 
         threshold = np.log10(threshold)
@@ -178,7 +178,7 @@ def plot_coverage(
 
     over_treshold = calculate_over_treshold(df)
 
-    df = df.to_pandas()
+    df = df
 
     coverage_plot = plt.figure(figsize=(15, 8))
     ax = sns.lineplot(data=df, x="pos", y="rolling")
@@ -190,7 +190,7 @@ def plot_coverage(
     plt.title(
         f"Percent bases with coverage above {threshold}X: {over_treshold: .1f}% | Rolling window: {rolling_window} nt"
     )
-    plt.suptitle(f"Ref: {df.iloc[0].ref} | Sample: {sample_name}")
+    plt.suptitle(f"Ref: {df['ref'][0]} | Sample: {sample_name}")
     ax.set(xlabel="Position", ylabel="Depth")
 
     if highlight:
@@ -258,8 +258,7 @@ def cli():
     parser.add_argument(
         "-o",
         "--outpath",
-        required=False,
-        default="bam2plots",
+        required=True,
         help="Where to save the plots.",
     )
     parser.add_argument(
@@ -404,6 +403,7 @@ def process_dataframe(perbase, sort_and_index, index, threshold):
             print_warning(
                 "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
             )
+            sys.exit(1)
         raise RuntimeError("Dataframe processing failed due to an error.") from e
 
 
@@ -426,7 +426,6 @@ def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
 
 def save_plot_cum(cum_plot, outpath, bam, plot_type):
     cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
-    print_green(f"[INFO]: Cumulative plot generated!")
 
     if plot_type == "png":
         cum_plot.savefig(f"{cum_plot_name}.png")
