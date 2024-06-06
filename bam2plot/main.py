@@ -17,6 +17,7 @@ import matplotlib
 import matplotlib.ticker as mtick
 import pyfastx
 import warnings
+
 warnings.filterwarnings("ignore")
 
 # for windows users
@@ -282,7 +283,7 @@ def cli():
         bam2plot_from_reads()
     elif sub_command == "guci":
         bam2plot_guci()
-        
+
     else:
         sys.exit(0)
 
@@ -314,7 +315,7 @@ def bam2plot_guci():
         choices=["png", "svg", "both"],
         help="How to save the plots",
     )
-    
+
     args = parser.parse_args()
     command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
     print_green(command)
@@ -334,32 +335,35 @@ def main_guci(
     plot_type,
 ):
     print_green(f"[INFO]: Running bam2plot guci!")
-    
+
     files_not_exists(ref)
     make_dir(out_folder)
-    
+
     print_green(f"[INFO]: Starting processing {Path(ref).stem}!")
-    
+
     df = guci(ref, window)
     title = f"GC content of: {Path(ref).stem}. Rolling window: {window}"
     plot = plot_gc(df, title)
-    
+
     out_name = f"{out_folder}/gc_{Path(ref).stem}.{plot_type}"
     plot.savefig(out_name)
-    
+
     print_green(f"[INFO]: Guci plot done!")
     print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
 
     exit(0)
+
 
 def bam2plot_from_reads():
     parser = argparse.ArgumentParser(
         description="Align your reads and plot the coverage!"
     )
     parser.add_argument("sub_command")
-    parser.add_argument("-r1", "--read_1", required=True, help="Fastq file 1")
     parser.add_argument(
-        "-r2", "--read_2", required=False, default=None, help="Fastq file 2"
+        "-r1", "--read_1", required=True, help="Fastq file 1 (Required)"
+    )
+    parser.add_argument(
+        "-r2", "--read_2", required=False, default=None, help="Fastq file 2 (Optional)"
     )
     parser.add_argument("-ref", "--reference", required=True, help="Reference fasta")
     parser.add_argument(
@@ -408,7 +412,6 @@ def bam2plot_from_reads():
     )
 
 
-### FROM_READS
 def map_fastq_to_ref_long_read(fastq, ref, preset="map-ont") -> pl.DataFrame:
     a = mp.Aligner(ref, preset=preset)
 
@@ -532,11 +535,6 @@ def plot_from_reads(
     return coverage_plot
 
 
-### END FROM_READS
-
-### GUCI
-
-
 def ref_to_seq_df(fastx_file: str) -> pl.DataFrame:
     fastx = pyfastx.Fastx(fastx_file)
     reads = list(zip(*[[x[0], x[1]] for x in fastx]))
@@ -587,9 +585,6 @@ def plot_gc(df, title):
     return fig
 
 
-### END GUCI
-
-
 def files_not_exists(*files):
     for file in files:
         if file is None:
@@ -623,11 +618,9 @@ def main_from_reads(
         df = map_fastq_to_ref_PE_read(read_1, read_2, ref)
 
     if gc:
-        df = (
-            df
-            .with_columns(rolling=pl.col("depth").rolling_mean(window_size=window))
-            .with_columns(rolling=pl.col("rolling") / pl.col("rolling").max())
-        )
+        df = df.with_columns(
+            rolling=pl.col("depth").rolling_mean(window_size=window)
+        ).with_columns(rolling=pl.col("rolling") / pl.col("rolling").max())
     else:
         df = df.with_columns(rolling=pl.col("depth").rolling_mean(window_size=window))
 
@@ -648,7 +641,6 @@ def main_from_reads(
             ax=coverage_plot.axes[0],
         )
 
-    ##
     save_plot_coverage(coverage_plot, out_folder, sample_name, ref_name, plot_type)
 
     print_green(f"[INFO]: Coverage plot done!")
@@ -861,7 +853,7 @@ def main_from_bam(
     plot_type,
 ) -> None:
     print_green(f"[INFO]: Running bam2plot from_bam!")
-    
+
     if zoom:
         start = int(zoom.split(" ")[0])
         end = int(zoom.split(" ")[1])
