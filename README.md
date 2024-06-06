@@ -2,43 +2,26 @@
 
 Plot your bam files!
 
-bam2plot generates coverage plots:
-![plot](example/normal.png)
-
-... and if `-c` is added, cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
-![plot](example/cumplot.png)
-
-If the flag `--highlight` is given, the regions with a coverage below the `--treshold` are highlighted:
-![plot](example/highlight.png)
-
-Below is an example of how bam2plot looks when runned in the terminal:
-![plot](example/running.png)
-
-## Dependencies
-`bam2plot` depends on `perbase`, which you can install via:
+## Subcommands
 ```bash
-cargo install perbase 
-# or
-conda install -c bioconda perbase
-```
-## Installation
-
-You can install `bam2plot` using the following pip command:
-
-```bash
-pip install bam2plot
+You must call bam2plot with the following subcommands:
+   [1]: 'from_bam'
+   [2]: 'from_reads'
+   [3]: 'guci'
 ```
 
-## Usage
-Once installed, you can use the `bam2plot` command to perform coverage analysis on BAM files and generate coverage plots. Here's how to use it:
-
+### bam2plot from_bam
 ```bash
-usage: bam2plot [-h] -b BAM [-o OUTPATH] [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW]
+usage: bam2plot [-h] -b BAM -o OUTPATH [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW]
                 [-i | --index | --no-index] [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM]
                 [-l | --log_scale | --no-log_scale] [-c | --cum_plot | --no-cum_plot]
                 [-hl | --highlight | --no-highlight] [-p {png,svg,both}]
+                sub_command
 
 Plot your bam files!
+
+positional arguments:
+  sub_command
 
 options:
   -h, --help            show this help message and exit
@@ -66,14 +49,91 @@ options:
                         How to save the plots
 ```
 
-## Outputs
+bam2plot from_bam generates coverage plots:
+![plot](example/normal.png)
 
-The BAM2Plot package generates coverage plots for each reference sequence in the BAM file. The plots are saved as SVG and PNG files in the specified output path or the default location.
+... and if `-c` is added, cumulative coverage plots for each reference (*e.g.* chromosomes) for each sample:
+![plot](example/cumplot.png)
 
-## Examples
+If the flag `--highlight` is given, the regions with a coverage below the `--treshold` are highlighted:
+![plot](example/highlight.png)
 
-Here's an example of how to use the BAM2Plot package:
+Below is an example of how bam2plot looks when runned in the terminal:
+![plot](example/running.png)
+
+#### Examples
+
+Here's an example of how to use the bam2plot from_bam:
 
 ```bash
-bam2plot --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c -hl
+bam2plot from_bam --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c -hl
 ```
+
+### bam2plot from_reads
+
+```bash
+usage: bam2plot [-h] -r1 READ_1 [-r2 READ_2] -ref REFERENCE [-gc | --guci | --no-guci] -o OUT_FOLDER
+                [-r ROLLING_WINDOW] [-p {png,svg,both}]
+                sub_command
+
+Align your reads and plot the coverage!
+
+positional arguments:
+  sub_command
+
+options:
+  -h, --help            show this help message and exit
+  -r1 READ_1, --read_1 READ_1
+                        Fastq file 1
+  -r2 READ_2, --read_2 READ_2
+                        Fastq file 2
+  -ref REFERENCE, --reference REFERENCE
+                        Reference fasta
+  -gc, --guci, --no-guci
+                        Plot GC content? (default: False)
+  -o OUT_FOLDER, --out_folder OUT_FOLDER
+                        Where to save the plots.
+  -r ROLLING_WINDOW, --rolling_window ROLLING_WINDOW
+                        Rolling window size
+  -p {png,svg,both}, --plot_type {png,svg,both}
+                        How to save the plots
+```
+
+### bam2plot guci
+
+```bash
+usage: bam2plot [-h] -ref REFERENCE -w WINDOW -o OUT_FOLDER [-p {png,svg,both}] sub_command
+
+Plot GC content of your reference fasta!
+
+positional arguments:
+  sub_command
+
+options:
+  -h, --help            show this help message and exit
+  -ref REFERENCE, --reference REFERENCE
+                        Reference fasta
+  -w WINDOW, --window WINDOW
+                        Rolling window size
+  -o OUT_FOLDER, --out_folder OUT_FOLDER
+                        Where to save the plots.
+  -p {png,svg,both}, --plot_type {png,svg,both}
+                        How to save the plots
+```
+
+
+## Dependencies
+`bam2plot` depends on `perbase`, which you can install via:
+```bash
+cargo install perbase 
+# or
+conda install -c bioconda perbase
+```
+## Installation
+
+You can install `bam2plot` using the following pip command:
+
+```bash
+pip install bam2plot
+```
+
