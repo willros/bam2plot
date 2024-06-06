@@ -478,8 +478,8 @@ def PE_reads_to_df(read_1, read_2) -> pl.DataFrame:
         )
 
     except:
-        print("fastq files do not match up, exiting...")
-        return
+        print_fail("fastq files do not match up!")
+        sys.exit(1)
 
 
 def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, preset="sr") -> pl.DataFrame:
