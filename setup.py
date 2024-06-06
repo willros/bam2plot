@@ -18,10 +18,11 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     python_requires=">=3.9",
     install_requires=[
-        "pandas==2.2.1",
         "pysam==0.22.0",
         "seaborn==0.13.2",
         "polars==0.20.15",
+        "mappy==2.28",
+        "pyfastx",
     ],
     entry_points={"console_scripts": ["bam2plot=bam2plot.main:cli"]},
 )

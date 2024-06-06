@@ -1,20 +1,23 @@
 from pathlib import Path
 import subprocess
-import pysam
 import sys
 from io import StringIO
 import _io
-import seaborn as sns
-import matplotlib.pyplot as plt
-import matplotlib
 import os
 import platform
-import pandas
-import matplotlib.ticker as mtick
-import numpy as np
 import argparse
 
 import polars as pl
+import seaborn as sns
+import numpy as np
+import pysam
+import mappy as mp
+import matplotlib.pyplot as plt
+import matplotlib
+import matplotlib.ticker as mtick
+import pyfastx
+import warnings
+warnings.filterwarnings("ignore")
 
 # for windows users
 if platform.system() == "Windows":
@@ -169,7 +172,7 @@ def plot_coverage(
 ) -> matplotlib.figure.Figure:
     if log_scale:
         df = df.with_columns(depth=(pl.col("depth") + 1).log10()).with_columns(
-                rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
+            rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
         )
 
         threshold = np.log10(threshold)
@@ -239,7 +242,7 @@ def plot_cumulative_coverage_for_all(df):
             for ref in df["ref"].unique()
         ]
     )
-    all_coverage = all_coverage.to_pandas()
+    all_coverage = all_coverage  # .to_pandas()
     grid = sns.FacetGrid(all_coverage, col="id", height=2.5, col_wrap=5)
     grid.map_dataframe(sns.lineplot, x="coverage", y="percent")
     plt.close()
@@ -253,7 +256,410 @@ def make_dir(outpath: str) -> None:
 
 
 def cli():
+    args = sys.argv
+    valid_subcommand = ["from_bam", "from_reads", "guci"]
+
+    if len(args) < 2:
+        print_fail("You must call bam2plot with the following subcommands:")
+        print_fail(f"   [1]: '{valid_subcommand[0]}'")
+        print_fail(f"   [2]: '{valid_subcommand[1]}'")
+        print_fail(f"   [3]: '{valid_subcommand[2]}'")
+        sys.exit(1)
+
+    sub_command = args[1]
+
+    if not sub_command in valid_subcommand:
+        print_fail(f"The following is not a valid sub command: {sub_command}")
+        print_fail(f"Choose between:")
+        print_fail(f"   [1]: '{valid_subcommand[0]}'")
+        print_fail(f"   [2]: '{valid_subcommand[1]}'")
+        print_fail(f"   [3]: '{valid_subcommand[2]}'")
+        sys.exit(1)
+
+    if sub_command == "from_bam":
+        bam2plot_from_bam()
+    elif sub_command == "from_reads":
+        bam2plot_from_reads()
+    elif sub_command == "guci":
+        bam2plot_guci()
+        
+    else:
+        sys.exit(0)
+
+
+def bam2plot_guci():
+    parser = argparse.ArgumentParser(
+        description="Plot GC content of your reference fasta!"
+    )
+    parser.add_argument("sub_command")
+    parser.add_argument("-ref", "--reference", required=True, help="Reference fasta")
+    parser.add_argument(
+        "-w",
+        "--window",
+        required=True,
+        help="Rolling window size",
+        type=int,
+    )
+    parser.add_argument(
+        "-o",
+        "--out_folder",
+        required=True,
+        help="Where to save the plots.",
+    )
+    parser.add_argument(
+        "-p",
+        "--plot_type",
+        required=False,
+        default="png",
+        choices=["png", "svg", "both"],
+        help="How to save the plots",
+    )
+    
+    args = parser.parse_args()
+    command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
+    print_green(command)
+
+    main_guci(
+        ref=args.reference,
+        window=args.window,
+        out_folder=args.out_folder,
+        plot_type=args.plot_type,
+    )
+
+
+def main_guci(
+    ref,
+    window,
+    out_folder,
+    plot_type,
+):
+    print_green(f"[INFO]: Running bam2plot guci!")
+    
+    files_not_exists(ref)
+    make_dir(out_folder)
+    
+    print_green(f"[INFO]: Starting processing {Path(ref).stem}!")
+    
+    df = guci(ref, window)
+    title = f"GC content of: {Path(ref).stem}. Rolling window: {window}"
+    plot = plot_gc(df, title)
+    
+    out_name = f"{out_folder}/gc_{Path(ref).stem}.{plot_type}"
+    plot.savefig(out_name)
+    
+    print_green(f"[INFO]: Guci plot done!")
+    print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
+
+    exit(0)
+
+def bam2plot_from_reads():
+    parser = argparse.ArgumentParser(
+        description="Align your reads and plot the coverage!"
+    )
+    parser.add_argument("sub_command")
+    parser.add_argument("-r1", "--read_1", required=True, help="Fastq file 1")
+    parser.add_argument(
+        "-r2", "--read_2", required=False, default=None, help="Fastq file 2"
+    )
+    parser.add_argument("-ref", "--reference", required=True, help="Reference fasta")
+    parser.add_argument(
+        "-gc",
+        "--guci",
+        required=False,
+        default=False,
+        help="Plot GC content?",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "-o",
+        "--out_folder",
+        required=True,
+        help="Where to save the plots.",
+    )
+    parser.add_argument(
+        "-r",
+        "--rolling_window",
+        required=False,
+        default=50,
+        help="Rolling window size",
+        type=int,
+    )
+    parser.add_argument(
+        "-p",
+        "--plot_type",
+        required=False,
+        default="png",
+        choices=["png", "svg", "both"],
+        help="How to save the plots",
+    )
+
+    args = parser.parse_args()
+    command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
+    print_green(command)
+
+    main_from_reads(
+        read_1=args.read_1,
+        read_2=args.read_2,
+        ref=args.reference,
+        window=args.rolling_window,
+        gc=args.guci,
+        out_folder=args.out_folder,
+        plot_type=args.plot_type,
+    )
+
+
+### FROM_READS
+def map_fastq_to_ref_long_read(fastq, ref, preset="map-ont") -> pl.DataFrame:
+    a = mp.Aligner(ref, preset=preset)
+
+    # see if the ref genome is the adequate one
+    test = 0
+    ref_len = None
+    for _, seq, _ in mp.fastx_read(fastq):
+        for hit in a.map(seq):
+            ref_len = hit.ctg_len
+
+        if ref_len is not None:
+            break
+
+        test += 1
+        if test > 1000:
+            print("NO ALIGNMENT TO THIS REFERENCE")
+            return
+            break
+
+    df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
+
+    for _, seq, _ in mp.fastx_read(fastq):
+        for hit in a.map(seq):
+            df = df.with_columns(
+                depth=pl.when(pl.col("pos").is_between(hit.r_st, hit.r_en))
+                .then(pl.col("depth") + 1)
+                .otherwise(pl.col("depth"))
+            )
+    return df
+
+
+def PE_reads_to_df(read_1, read_2) -> pl.DataFrame:
+    def parse_PE_read(fastx, read_name, comment_name, seq_name):
+
+        reads = pyfastx.Fastx(fastx, comment=True)
+        names = []
+        seqs = []
+        comments = []
+
+        for name, seq, qual, comment in reads:
+            names.append(name)
+            seqs.append(seq)
+            comments.append(comment)
+
+        return pl.DataFrame({read_name: names, comment_name: comments, seq_name: seqs})
+
+    read_1 = parse_PE_read(
+        read_1, read_name="name_1", comment_name="comment_1", seq_name="seq_1"
+    )
+    read_2 = parse_PE_read(
+        read_2, read_name="name_2", comment_name="comment_2", seq_name="seq_2"
+    )
+
+    try:
+        return (
+            pl.concat([read_1, read_2], how="horizontal")
+            .sort(pl.col("comment_1"), pl.col("comment_2"))
+            .with_columns(
+                comment_1=pl.col("comment_1").str.replace("/.*", ""),
+                comment_2=pl.col("comment_2").str.replace("/.*", ""),
+            )
+            .filter(pl.col("comment_1") == pl.col("comment_2"))
+            .select(pl.col("seq_1"), pl.col("seq_2"))
+        )
+
+    except:
+        print("fastq files do not match up, exiting...")
+        return
+
+
+def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, preset="sr") -> pl.DataFrame:
+    a = mp.Aligner(ref, preset=preset)
+
+    # see if the ref genome is the adequate one
+    test = 0
+    ref_len = None
+    PE_df = PE_reads_to_df(fastq_1, fastq_2)
+    for reads in PE_df.iter_rows(named=True):
+        for hit in a.map(reads["seq_1"], reads["seq_2"]):
+            ref_len = hit.ctg_len
+
+        if ref_len is not None:
+            break
+
+        test += 1
+        if test > 1000:
+            print_fail(f"No alignment to this reference: {ref}")
+            sys.exit(1)
+
+    df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
+
+    counter = 0
+    print_green(f"Processing read: 1 of {PE_df.shape[0]}")
+    for reads in PE_df.iter_rows(named=True):
+        counter += 1
+        if counter % 50_000 == 0:
+            print_green(f"Processing read: {counter} of {PE_df.shape[0]}")
+        for hit in a.map(reads["seq_1"], reads["seq_2"]):
+            df = df.with_columns(
+                depth=pl.when(pl.col("pos").is_between(hit.r_st, hit.r_en))
+                .then(pl.col("depth") + 1)
+                .otherwise(pl.col("depth"))
+            )
+    return df
+
+
+def plot_from_reads(
+    df,
+    sample_name,
+    ref_name,
+    window,
+):
+    coverage_plot = plt.figure(figsize=(15, 8))
+    ax = sns.lineplot(data=df, x="pos", y="rolling")
+    plt.title(f" Sample: {sample_name}| Ref: {ref_name} | Rolling window: {window}")
+    ax.set(xlabel="Position", ylabel="Depth")
+    zero = plt.axhline(y=0, color="red")
+    zero.set_label("Zero")
+    plt.close()
+
+    return coverage_plot
+
+
+### END FROM_READS
+
+### GUCI
+
+
+def ref_to_seq_df(fastx_file: str) -> pl.DataFrame:
+    fastx = pyfastx.Fastx(fastx_file)
+    reads = list(zip(*[[x[0], x[1]] for x in fastx]))
+
+    df = (
+        pl.DataFrame(
+            {
+                "name": reads[0],
+                "sequence": reads[1],
+            }
+        )
+        .select(pl.col("sequence").str.split("").explode(), pl.col("name"))
+        .filter(pl.col("sequence") != "")
+        .with_row_index(name="position", offset=1)
+    )
+
+    return df
+
+
+def add_gc(df) -> pl.DataFrame:
+    return df.with_columns(
+        gc=pl.when(pl.col("sequence").str.contains("G|C")).then(1).otherwise(0)
+    )
+
+
+def add_rolling_mean(df, window):
+    return df.with_columns(rolling_gc=pl.col("gc").rolling_mean(window_size=window))
+
+
+def guci(fastx_file, window):
+    df = ref_to_seq_df(fastx_file)
+    df = add_gc(df)
+    df = add_rolling_mean(df, window).select(pl.col("position"), pl.col("rolling_gc"))
+    return df
+
+
+def plot_gc(df, title):
+    fig = plt.figure(figsize=(50, 15))
+    plt.plot(df["position"], df["rolling_gc"])
+    plt.gca().set_yticklabels([f"{x:.0%}" for x in plt.gca().get_yticks()])
+    plt.gca().xaxis.set_major_formatter(
+        plt.matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
+    )
+    plt.ylabel("% GC content")
+    plt.xlabel("Position")
+    plt.title(title)
+    plt.close()
+    return fig
+
+
+### END GUCI
+
+
+def files_not_exists(*files):
+    for file in files:
+        if file is None:
+            continue
+        if not Path(file).exists():
+            print_fail(f"[ERROR]: The file {file} does not exist")
+            exit(1)
+
+
+def main_from_reads(
+    read_1,
+    read_2,
+    ref,
+    window,
+    gc,
+    out_folder,
+    plot_type,
+) -> None:
+    print_green(f"[INFO]: Running bam2plot from_reads!")
+
+    files_not_exists(read_1, read_2, ref)
+    make_dir(out_folder)
+    sample_name = Path(read_1).stem
+    ref_name = Path(ref).stem
+
+    if read_2 is None:
+        print_green(f"[INFO]: Running bam2plot on reads from: {read_1}!")
+        df = map_fastq_to_ref_long_read(read_1, ref)
+    else:
+        print_green(f"[INFO]: Running bam2plot on reads from: {read_1} and {read_2}!")
+        df = map_fastq_to_ref_PE_read(read_1, read_2, ref)
+
+    if gc:
+        df = (
+            df
+            .with_columns(rolling=pl.col("depth").rolling_mean(window_size=window))
+            .with_columns(rolling=pl.col("rolling") / pl.col("rolling").max())
+        )
+    else:
+        df = df.with_columns(rolling=pl.col("depth").rolling_mean(window_size=window))
+
+    coverage_plot = plot_from_reads(
+        df,
+        sample_name=sample_name,
+        ref_name=ref_name,
+        window=window,
+    )
+
+    if gc:
+        guci_df = guci(ref, window)
+        sns.lineplot(
+            x="position",
+            y="rolling_gc",
+            data=guci_df,
+            color="orange",
+            ax=coverage_plot.axes[0],
+        )
+
+    ##
+    save_plot_coverage(coverage_plot, out_folder, sample_name, ref_name, plot_type)
+
+    print_green(f"[INFO]: Coverage plot done!")
+    print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
+
+    exit(0)
+
+
+def bam2plot_from_bam():
     parser = argparse.ArgumentParser(description="Plot your bam files!")
+    parser.add_argument("sub_command")
     parser.add_argument("-b", "--bam", required=True, help="bam file")
     parser.add_argument(
         "-o",
@@ -344,7 +750,7 @@ def cli():
     command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
     print_green(command)
 
-    main(
+    main_from_bam(
         bam=args.bam,
         outpath=args.outpath,
         whitelist=args.whitelist,
@@ -440,7 +846,7 @@ def save_plot_cum(cum_plot, outpath, bam, plot_type):
     print_green(f"[INFO]: Cumulative plot generated!")
 
 
-def main(
+def main_from_bam(
     bam,
     outpath,
     whitelist,
@@ -454,7 +860,8 @@ def main(
     highlight,
     plot_type,
 ) -> None:
-    print_green(f"[INFO]: Running bam2plot on {bam}!")
+    print_green(f"[INFO]: Running bam2plot from_bam!")
+    
     if zoom:
         start = int(zoom.split(" ")[0])
         end = int(zoom.split(" ")[1])
