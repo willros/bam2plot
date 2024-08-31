@@ -74,13 +74,18 @@ def index_bam(bam: str, new_name: str) -> None:
 
 
 def run_perbase(bam: str) -> _io.StringIO:
-    return StringIO(
-        subprocess.check_output(
-            f"perbase only-depth --keep-zeros {bam}",
-            shell=True,
-            stderr=subprocess.DEVNULL,
-        ).decode(errors="ignore")
-    )
+    try:
+        return StringIO(
+            subprocess.check_output(
+                f"perbase only-depth --keep-zeros {bam}",
+                shell=True,
+                stderr=subprocess.DEVNULL,
+            ).decode(errors="ignore")
+        )
+    except Exception as e:
+        print_fail("Running perbase did not work. Is it installed?")
+        exit(1)
+        
 
 
 def perbase_to_df(perbase: _io.StringIO, threshold) -> pl.DataFrame:
