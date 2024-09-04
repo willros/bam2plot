@@ -862,7 +862,7 @@ def process_dataframe(sort_and_index, index, threshold):
         df = mosdepth_to_df(threshold)
         return df
     except:
-        print_fail(f"[ERROR]: Could not process dataframe: {str(e)}")
+        print_fail(f"[ERROR]: Could not process dataframe")
         if not (sort_and_index or index):
             print_warning(
                 "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
