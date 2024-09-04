@@ -2,6 +2,9 @@
 
 Plot your bam files!
 
+## UPDATE
+`bam2plot` no longer depends on `perbase`. Now, `bam2plot` depends on [mosdepth](https://github.com/brentp/mosdepth)
+
 ## Subcommands
 ```bash
 You must call bam2plot with the following subcommands:
@@ -13,9 +16,9 @@ You must call bam2plot with the following subcommands:
 ### bam2plot from_bam
 ```bash
 usage: bam2plot [-h] -b BAM -o OUTPATH [-w WHITELIST] [-t THRESHOLD] [-r ROLLING_WINDOW]
-                [-i | --index | --no-index] [-s | --sort_and_index | --no-sort_and_index] [-z ZOOM]
-                [-l | --log_scale | --no-log_scale] [-c | --cum_plot | --no-cum_plot]
-                [-hl | --highlight | --no-highlight] [-p {png,svg,both}]
+                [-i | --index | --no-index] [-s | --sort_and_index | --no-sort_and_index]
+                [-z ZOOM] [-c | --cum_plot | --no-cum_plot] [-p {png,svg,both}]
+                [-n NUMBER_OF_REFS]
                 sub_command
 
 Plot your bam files!
@@ -35,18 +38,16 @@ options:
   -r ROLLING_WINDOW, --rolling_window ROLLING_WINDOW
                         Rolling window size
   -i, --index, --no-index
-                        Index bam file (default: False)
+                        Index bam file
   -s, --sort_and_index, --no-sort_and_index
-                        Index and sort bam file (default: False)
+                        Index and sort bam file
   -z ZOOM, --zoom ZOOM  Zoom into this region. Example: -z='100 2000'
-  -l, --log_scale, --no-log_scale
-                        Log scale of Y axis (default: False)
   -c, --cum_plot, --no-cum_plot
-                        Generate cumulative plots of all chromosomes (default: False)
-  -hl, --highlight, --no-highlight
-                        Highlights regions where coverage is below treshold. (default: False)
+                        Generate cumulative plots of all chromosomes
   -p {png,svg,both}, --plot_type {png,svg,both}
                         How to save the plots
+  -n NUMBER_OF_REFS, --number_of_refs NUMBER_OF_REFS
+                        How many references (chromosomes) to plot
 ```
 
 bam2plot from_bam generates coverage plots:
@@ -66,7 +67,7 @@ Below is an example of how bam2plot looks when runned in the terminal:
 Here's an example of how to use the bam2plot from_bam:
 
 ```bash
-bam2plot from_bam --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c -hl
+bam2plot from_bam --bam input.bam --outpath output_folder --rolling_window 50 --threshold 5 -s -c
 ```
 
 ### bam2plot from_reads
@@ -123,11 +124,9 @@ options:
 
 
 ## Dependencies
-`bam2plot` depends on `perbase`, which you can install via:
+`bam2plot` depends on [mosdepth](https://github.com/brentp/mosdepth), which you can install via:
 ```bash
-cargo install perbase 
-# or
-conda install -c bioconda perbase
+conda install -c bioconda mosdepth
 ```
 ## Installation
 
@@ -136,4 +135,3 @@ You can install `bam2plot` using the following pip command:
 ```bash
 pip install bam2plot
 ```
-
