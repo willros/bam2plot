@@ -6,6 +6,7 @@ import _io
 import os
 import platform
 import argparse
+import warnings
 
 import polars as pl
 import seaborn as sns
@@ -15,8 +16,10 @@ import mappy as mp
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.ticker as mtick
+from matplotlib.collections import LineCollection
+from matplotlib.lines import Line2D
 import pyfastx
-import warnings
+
 
 warnings.filterwarnings("ignore")
 
@@ -29,6 +32,7 @@ sns.set_theme()
 
 SORTED_TEMP = "TEMP112233.sorted.bam"
 SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
+MOSDEPTH_TEMP = "MOSDEPTH_TEMP"
 
 
 class bcolors:
@@ -73,146 +77,204 @@ def index_bam(bam: str, new_name: str) -> None:
         exit(1)
 
 
-def run_perbase(bam: str) -> _io.StringIO:
+def run_mosdepth(bam: str, threads: int = 1, mosdepth=MOSDEPTH_TEMP):
     try:
-        return StringIO(
-            subprocess.check_output(
-                f"perbase only-depth --keep-zeros {bam}",
-                shell=True,
-                stderr=subprocess.DEVNULL,
-            ).decode(errors="ignore")
-        )
+        subprocess.call(["mosdepth", "-x", "-t", str(threads), mosdepth, bam])
     except Exception as e:
-        print_fail("Running perbase did not work. Is it installed?")
+        print_fail("Running mosdepth did not work. Is it installed?")
+        print(e)
         exit(1)
-        
 
 
-def perbase_to_df(perbase: _io.StringIO, threshold) -> pl.DataFrame:
-    return (
-        pl.read_csv(perbase, separator="\t", dtypes={"REF": str})
-        .rename({"DEPTH": "depth", "REF": "ref", "END": "end", "POS": "pos"})
-        .with_columns(n_bases=(pl.col("end") - pl.col("pos")))
+def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
+    mosdepth = f"{mosdepth}.per-base.bed.gz"
+    df = (
+        pl.read_csv(
+            mosdepth,
+            separator="\t",
+            has_header=False,
+            new_columns=["ref", "start", "end", "depth"],
+        )
+        .with_columns(n_bases=pl.col("end") - pl.col("start"))
+        .with_columns(cum_coverage=pl.col("n_bases") * pl.col("depth"))
+        .with_columns(total_bases=pl.col("n_bases").sum().over("ref"))
         .with_columns(
-            over_zero=pl.when(pl.col("depth") == 0).then(pl.col("n_bases")).otherwise(0)
+            mean_coverage=pl.col("cum_coverage").sum().over("ref")
+            / pl.col("total_bases").over("ref")
         )
         .with_columns(
-            over_t=pl.when(pl.col("depth") > threshold)
+            mean_coverage_total=pl.col("cum_coverage").sum()
+            / pl.col("total_bases").sum()
+        )
+        .with_columns(
+            over_zero=pl.when(pl.col("depth") > 0).then(pl.col("n_bases")).otherwise(0)
+        )
+        .with_columns(
+            pct_over_zero=pl.col("over_zero").sum().over("ref")
+            / pl.col("total_bases").over("ref")
+        )
+        .with_columns(
+            over_thresh=pl.when(pl.col("depth") > thresh)
             .then(pl.col("n_bases"))
             .otherwise(0)
         )
+        .with_columns(
+            pct_over_thresh=pl.col("over_thresh").sum().over("ref")
+            / pl.col("total_bases").over("ref")
+        )
+        .with_columns(
+            pct_total_over_zero=pl.col("over_zero").sum() / pl.col("total_bases").sum()
+        )
+        .with_columns(
+            pct_total_over_thresh=pl.col("over_thresh").sum()
+            / pl.col("total_bases").sum()
+        )
+        .select(pl.col("*").exclude("over_zero", "over_thresh", "cum_coverage"))
     )
-
-
-def calculate_mean_coverage(df):
-    mean_coverage = df.with_columns(w=(pl.col("depth") * pl.col("n_bases")))
-
-    return mean_coverage["w"].sum() / mean_coverage["n_bases"].sum()
-
-
-def calculate_is_zero(df):
-    return df["over_zero"].sum() / df["n_bases"].sum() * 100
-
-
-def calculate_over_treshold(df):
-    return df["over_t"].sum() / df["n_bases"].sum() * 100
+    os.remove("MOSDEPTH_TEMP.per-base.bed.gz.csi")
+    os.remove("MOSDEPTH_TEMP.mosdepth.summary.txt")
+    os.remove("MOSDEPTH_TEMP.mosdepth.global.dist.txt")
+    os.remove("MOSDEPTH_TEMP.per-base.bed.gz")
+    return df
 
 
 def print_coverage_info(df, threshold: int) -> None:
-    name = df["ref"][0]
-
-    over_zero = 100 - calculate_is_zero(df)
-    over_treshold = calculate_over_treshold(df)
-    mean_coverage = calculate_mean_coverage(df)
-    print_blue(f"[SUMMARIZE]: Coverage information for: {name}")
-
-    print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
-
+    print_blue(f'[SUMMARIZE]: Coverage information for: {df["ref"][0]}')
     print_blue(
-        f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
+        f'[SUMMARIZE]: Percent bases with coverage above 0X: {df["pct_over_zero"][0] * 100: .1f}%'
     )
-
-    print_blue(f"   [SUMMARIZE]: mean coverage: {mean_coverage: .0f}X")
+    print_blue(
+        f'[SUMMARIZE]: Percent bases with coverage above {threshold}X: {df["pct_over_thresh"][0] * 100: .1f}%'
+    )
+    print_blue(f'   [SUMMARIZE]: mean coverage: {df["mean_coverage"][0]: .1f}X')
 
 
 def print_total_reference_info(df, threshold: int) -> None:
-    mean_coverage = calculate_mean_coverage(df)
-    over_zero = 100 - calculate_is_zero(df)
-    over_treshold = calculate_over_treshold(df)
-
-    print_blue(f"[SUMMARIZE]: Mean coverage of all basepairs: {mean_coverage: .1f}X")
-    print_blue(f"[SUMMARIZE]: Percent bases with coverage above 0X: {over_zero: .1f}%")
     print_blue(
-        f"[SUMMARIZE]: Percent bases with coverage above {threshold}X: {over_treshold: .1f}%"
+        f'[SUMMARIZE]: Mean coverage of all basepairs: {df["mean_coverage_total"][0]: .1f}X'
+    )
+    print_blue(
+        f'[SUMMARIZE]: Percent bases with coverage above 0X: {df["pct_total_over_zero"][0] * 100: .1f}%'
+    )
+    print_blue(
+        f'[SUMMARIZE]: Percent bases with coverage above {threshold}X: {df["pct_total_over_thresh"][0] * 100: .1f}%'
     )
 
 
-def under_threshold(df, threshold):
-    df = df.with_columns(zero=pl.col("depth") < threshold)
+def refs_with_most_coverage(df, n=None) -> list:
+    if n is None:
+        n = df.n_unique("ref")
 
-    start = []
-    stop = []
-
-    start_value = False
-    for row in df.iter_rows(named=True):
-        if row["zero"] and not start_value:
-            start_value = True
-            start.append(row["pos"])
-
-        if not row["zero"] and start_value:
-            start_value = False
-            stop.append(row["pos"])
-
-    if len(start) > len(stop):
-        stop.append(df["pos"].max())
-    return start, stop
-
-
-def plot_coverage(
-    df,
-    sample_name: str,
-    threshold: int,
-    rolling_window: int,
-    log_scale: bool = False,
-    highlight: bool = False,
-) -> matplotlib.figure.Figure:
-    if log_scale:
-        df = df.with_columns(depth=(pl.col("depth") + 1).log10()).with_columns(
-            rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
+    if n > 100:
+        print_warning(
+            f"[WARNING]: Number of reference to plot is {n} – which is too many!"
         )
+        print_warning("[WARNING]: Please choose a number < 100 with --number_to_plot")
+        sys.exit(1)
 
-        threshold = np.log10(threshold)
+    return (
+        df.unique(subset="ref")
+        .sort("mean_coverage", descending=True)[0:n, "ref"]
+        .to_list()
+    )
 
-    mean_coverage = calculate_mean_coverage(df)
 
-    over_treshold = calculate_over_treshold(df)
+def return_ref_for_plotting(df, ref, thresh, rolling_window: int = None):
 
-    df = df
+    if df.filter(pl.col("ref") == ref)["total_bases"][0] < 10_000:
+        rolling_window = 1
+        modulo = 1
+    else:
+        if rolling_window is None:
+            rolling_window = (
+                df.filter(pl.col("ref") == ref)["total_bases"][0] // 100_000
+            )
+        modulo = df.filter(pl.col("ref") == ref)["total_bases"][0] // 1000
 
-    coverage_plot = plt.figure(figsize=(15, 8))
-    ax = sns.lineplot(data=df, x="pos", y="rolling")
-    zero = plt.axhline(y=0, color="red")
-    zero.set_label("Zero")
-    mean = plt.axhline(y=mean_coverage, color="green")
-    mean.set_label(f"Mean coverage: {mean_coverage: .1f}X")
-    plt.legend(loc="upper right")
+    return (
+        df.filter(pl.col("ref") == ref)
+        .sort("start")
+        .with_columns(pos=pl.int_ranges(start="start", end="end"))
+        .explode(pl.col("pos"))
+        .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
+        .with_columns(
+            zero=pl.when(pl.col("rolling") == 0)
+            .then(pl.lit("#FF6F61"))
+            .when(pl.col("rolling") > thresh)
+            .then(pl.lit("#4A90E2"))
+            .otherwise(pl.lit("#FFC107"))
+        )
+        .fill_null(0)
+        .with_row_index()
+        .filter(pl.col("index") % modulo == 0)
+    )
+
+    df = df.sort("start")
+    if rolling_window is None:
+        rolling_window = df["total_bases"][0] // 100_000
+    modulo = df["total_bases"][0] // 1000
+    return (
+        df.filter(pl.col("ref") == ref)
+        .with_columns(pos=pl.int_ranges(start="start", end="end"))
+        .explode(pl.col("pos"))
+        .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
+        .with_columns(
+            zero=pl.when(pl.col("rolling") == 0)
+            .then(pl.lit("#FF6F61"))
+            .when(pl.col("rolling") > thresh)
+            .then(pl.lit("#4A90E2"))
+            .otherwise(pl.lit("#FFC107"))
+        )
+        .fill_null(0)
+        .with_row_index()
+        .filter(pl.col("index") % modulo == 0)
+    )
+
+
+def coverage_plot(
+    df: pl.DataFrame,
+    x_col: str,
+    y_col: str,
+    color_col: str,
+    thresh: int,
+    rolling_window: int,
+    sample_name: str,
+):
+    df_pd = df.to_pandas()
+
+    x = df_pd[x_col].values
+    y = df_pd[y_col].values
+    colors = df_pd[color_col].values
+
+    points = np.array([x, y]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+    lc = LineCollection(segments, colors=colors, linewidth=3)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.add_collection(lc)
+    # ax.autoscale()
+    ax.set_xlim(x.min(), x.max())
+    ax.set_ylim(-1, y.max())
+
+    legend_elements = [
+        Line2D([0], [0], color="#FF6F61", lw=1, label="0X"),
+        Line2D([0], [0], color="#FFC107", lw=1, label="Over 0X"),
+        Line2D([0], [0], color="#4A90E2", lw=1, label=f"Over {thresh}X"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right")
+
     plt.title(
-        f"Percent bases with coverage above {threshold}X: {over_treshold: .1f}% | Rolling window: {rolling_window} nt"
+        f"Percent bases with coverage above {thresh}X: {df['pct_over_thresh'][0] * 100: .1f}% | Rolling window: {rolling_window} nt"
     )
     plt.suptitle(f"Ref: {df['ref'][0]} | Sample: {sample_name}")
-    ax.set(xlabel="Position", ylabel="Depth")
-
-    if highlight:
-        for a, b in zip(*under_threshold(df, threshold)):
-            plt.fill_between([a, b], 0, mean_coverage, color="red", alpha=0.2)
-
     plt.close()
 
-    return coverage_plot
+    return fig
 
 
 def coverage_for_value(df, coverage: int):
-    number_of_bases = df["pos"].max()
+    number_of_bases = df["total_bases"][0]
     _id = df["ref"][0][:20]
 
     percent_df = df.with_columns(
@@ -230,25 +292,25 @@ def coverage_for_value(df, coverage: int):
     )
 
 
-def coverage_for_many_values(df, values):
+def coverage_for_many_values(df, coverage_values):
     dfs = []
-    for coverage in values:
+    for coverage in coverage_values:
         coverage_df = coverage_for_value(df, coverage)
         dfs.append(coverage_df)
     return pl.concat(dfs)
 
 
-def plot_cumulative_coverage_for_all(df):
+def plot_cumulative_coverage_for_all(df, n):
     max_cov = df["depth"].max()
     coverage_values = np.linspace(0, max_cov, 15)
+    top_n_refs = refs_with_most_coverage(df, n=n)
 
     all_coverage = pl.concat(
         [
             coverage_for_many_values(df.filter(pl.col("ref") == ref), coverage_values)
-            for ref in df["ref"].unique()
+            for ref in top_n_refs
         ]
     )
-    all_coverage = all_coverage  # .to_pandas()
     grid = sns.FacetGrid(all_coverage, col="id", height=2.5, col_wrap=5)
     grid.map_dataframe(sns.lineplot, x="coverage", y="percent")
     plt.close()
@@ -654,6 +716,16 @@ def main_from_reads(
     exit(0)
 
 
+def check_range(value):
+    ivalue = int(value)
+    if ivalue < 1 or ivalue > 100:
+        print_fail(
+            f"   [ERROR]: {value} is an invalid number of references. Choose a number between 1 and 100."
+        )
+        sys.exit(1)
+    return ivalue
+
+
 def bam2plot_from_bam():
     parser = argparse.ArgumentParser(description="Plot your bam files!")
     parser.add_argument("sub_command")
@@ -675,7 +747,7 @@ def bam2plot_from_bam():
         "-t",
         "--threshold",
         required=False,
-        default=3,
+        default=10,
         help="Threshold of mean coverage depth",
         type=int,
     )
@@ -683,7 +755,7 @@ def bam2plot_from_bam():
         "-r",
         "--rolling_window",
         required=False,
-        default=10,
+        default=100,
         help="Rolling window size",
         type=int,
     )
@@ -711,27 +783,11 @@ def bam2plot_from_bam():
         help="Zoom into this region. Example: -z='100 2000'",
     )
     parser.add_argument(
-        "-l",
-        "--log_scale",
-        required=False,
-        default=False,
-        help="Log scale of Y axis",
-        action=argparse.BooleanOptionalAction,
-    )
-    parser.add_argument(
         "-c",
         "--cum_plot",
         required=False,
         default=False,
         help="Generate cumulative plots of all chromosomes",
-        action=argparse.BooleanOptionalAction,
-    )
-    parser.add_argument(
-        "-hl",
-        "--highlight",
-        required=False,
-        default=False,
-        help="Highlights regions where coverage is below treshold.",
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
@@ -741,6 +797,14 @@ def bam2plot_from_bam():
         default="png",
         choices=["png", "svg", "both"],
         help="How to save the plots",
+    )
+    parser.add_argument(
+        "-n",
+        "--number_of_refs",
+        required=False,
+        default=10,
+        type=check_range,  # cap
+        help="How many references (chromosomes) to plot",
     )
 
     args = parser.parse_args()
@@ -756,16 +820,15 @@ def bam2plot_from_bam():
         index=args.index,
         sort_and_index=args.sort_and_index,
         zoom=args.zoom,
-        log_scale=args.log_scale,
         cum_plot=args.cum_plot,
-        highlight=args.highlight,
         plot_type=args.plot_type,
+        number_of_refs=args.number_of_refs,
     )
 
 
-def if_sort_and_index(sort_and_index, index, bam):
+def if_sort_and_index(sort_and_index, index, bam) -> None:
     if not sort_and_index and not index:
-        return run_perbase(bam)
+        run_mosdepth(bam)
 
     if sort_and_index:
         print_green("[INFO]: Sorting bam file")
@@ -779,11 +842,11 @@ def if_sort_and_index(sort_and_index, index, bam):
 
     try:
         if sort_and_index:
-            perbase = run_perbase(SORTED_TEMP)
+            run_mosdepth(SORTED_TEMP)
         if index:
-            perbase = run_perbase(bam)
+            run_mosdepth(bam)
     except:
-        print_fail("[ERROR]: Could not run perbase on bam file")
+        print_fail("[ERROR]: Could not run mosdepth on bam file")
         exit(1)
     finally:
         if sort_and_index:
@@ -792,22 +855,19 @@ def if_sort_and_index(sort_and_index, index, bam):
         if index:
             os.remove(index_name)
 
-        return perbase
 
-
-def process_dataframe(perbase, sort_and_index, index, threshold):
+def process_dataframe(sort_and_index, index, threshold):
     try:
         print_green("[INFO]: Processing dataframe")
-        df = perbase_to_df(perbase, threshold)
+        df = mosdepth_to_df(threshold)
         return df
-    except Exception as e:
+    except:
         print_fail(f"[ERROR]: Could not process dataframe: {str(e)}")
         if not (sort_and_index or index):
             print_warning(
                 "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
             )
             sys.exit(1)
-        raise RuntimeError("Dataframe processing failed due to an error.") from e
 
 
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
@@ -852,10 +912,9 @@ def main_from_bam(
     index,
     sort_and_index,
     zoom,
-    log_scale,
     cum_plot,
-    highlight,
     plot_type,
+    number_of_refs,
 ) -> None:
     print_green(f"[INFO]: Running bam2plot from_bam!")
 
@@ -873,9 +932,9 @@ def main_from_bam(
     make_dir(outpath)
     sample_name = Path(bam).stem
 
-    perbase = if_sort_and_index(sort_and_index, index, bam)
+    if_sort_and_index(sort_and_index, index, bam)
 
-    df = process_dataframe(perbase, sort_and_index, index, threshold)
+    df = process_dataframe(sort_and_index, index, threshold)
 
     print_total_reference_info(df, threshold)
 
@@ -886,38 +945,38 @@ def main_from_bam(
         )
         df = df.filter(pl.col("ref").is_in(whitelist))
 
-    plot_number = df["ref"].n_unique()
-    if plot_number == 0:
+    if number_of_refs == 0:
         print_fail("[ERROR]: No reference to plot against!")
         exit(1)
 
-    plot_text = "plot" if plot_number == 1 else "plots"
-    print_green(f"[INFO]: Generating {plot_number} {plot_text}:")
+    plot_text = "plot" if number_of_refs == 1 else "plots"
+    print_green(f"[INFO]: Generating {number_of_refs} {plot_text}:")
 
-    for reference in df["ref"].unique():
-        mpileup_df = df.filter(pl.col("ref") == reference).with_columns(
-            rolling=pl.col("depth").rolling_mean(window_size=rolling_window)
-        )
+    top_n_refs = refs_with_most_coverage(df, n=number_of_refs)
+
+    for reference in top_n_refs:
+        df_to_plot = return_ref_for_plotting(df, reference, threshold, rolling_window)
 
         if zoom:
-            mpileup_df = mpileup_df.filter(pl.col("pos").is_between(start, end))
-            if mpileup_df.shape[0] == 0:
+            df_to_plot = df_to_plot.filter(pl.col("pos").is_between(start, end))
+            if df_to_plot.shape[0] == 0:
                 print_warning("[WARNING]: No positions to plot after zoom")
                 continue
 
-        if mpileup_df.shape[0] == 0:
+        if df_to_plot.shape[0] == 0:
             print_warning("[WARNING]: No positions to plot")
             continue
 
-        print_coverage_info(mpileup_df, threshold)
+        print_coverage_info(df_to_plot, threshold)
 
-        plot = plot_coverage(
-            mpileup_df,
+        plot = coverage_plot(
+            df_to_plot,
+            "pos",
+            "rolling",
+            "zero",
+            threshold,
+            rolling_window,
             sample_name,
-            threshold=threshold,
-            rolling_window=rolling_window,
-            log_scale=log_scale,
-            highlight=highlight,
         )
 
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
@@ -926,7 +985,7 @@ def main_from_bam(
 
     if cum_plot:
         print_green("[INFO]: Generating cumulative coverage plots for each reference")
-        cum_plot = plot_cumulative_coverage_for_all(df)
+        cum_plot = plot_cumulative_coverage_for_all(df, n=number_of_refs)
         save_plot_cum(cum_plot, outpath, bam, plot_type)
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
