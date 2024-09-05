@@ -65,7 +65,7 @@ def sort_bam(bam: str, new_name: str) -> None:
     try:
         pysam.sort("-o", new_name, bam)
     except:
-        print_fail("[ERROR]: The file is not a bam file!")
+        print_fail("[ERROR]: The bam file is broken or it is not a bam file!")
         exit(1)
 
 
@@ -73,7 +73,9 @@ def index_bam(bam: str, new_name: str) -> None:
     try:
         pysam.index(bam, new_name)
     except:
-        print_fail("[ERROR]: The file is not sorted! Run 'bam2plot <bam> -s'")
+        print_fail(
+            "[ERROR]: The file is not sorted or it is not a bam file! Run 'bam2plot <bam> -s'"
+        )
         exit(1)
 
 
@@ -81,8 +83,7 @@ def run_mosdepth(bam: str, threads: int = 1, mosdepth=MOSDEPTH_TEMP):
     try:
         subprocess.call(["mosdepth", "-x", "-t", str(threads), mosdepth, bam])
     except Exception as e:
-        print_fail("Running mosdepth did not work. Is it installed?")
-        print(e)
+        print_fail("[ERROR]: Running mosdepth did not work. Is it installed?")
         exit(1)
 
 
@@ -131,10 +132,12 @@ def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
         )
         .select(pl.col("*").exclude("over_zero", "over_thresh", "cum_coverage"))
     )
+
     os.remove("MOSDEPTH_TEMP.per-base.bed.gz.csi")
     os.remove("MOSDEPTH_TEMP.mosdepth.summary.txt")
     os.remove("MOSDEPTH_TEMP.mosdepth.global.dist.txt")
     os.remove("MOSDEPTH_TEMP.per-base.bed.gz")
+
     return df
 
 
@@ -174,7 +177,7 @@ def refs_with_most_coverage(df, n=None) -> list:
 
     return (
         df.unique(subset="ref")
-        .sort("mean_coverage", descending=True)[0:n, "ref"]
+        .sort("pct_over_thresh", descending=True)[0:n, "ref"]
         .to_list()
     )
 
@@ -954,7 +957,7 @@ def main_from_bam(
 
     top_n_refs = refs_with_most_coverage(df, n=number_of_refs)
 
-    for reference in top_n_refs:
+    for i, reference in enumerate(top_n_refs):
         df_to_plot = return_ref_for_plotting(df, reference, threshold, rolling_window)
 
         if zoom:
@@ -978,7 +981,7 @@ def main_from_bam(
             rolling_window,
             sample_name,
         )
-
+        plot_name = f"{i}_{sample_name}"
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
