@@ -105,7 +105,7 @@ def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
         )
         .with_columns(
             mean_coverage_total=pl.col("cum_coverage").sum()
-            / pl.col("total_bases").sum()
+            / (pl.col(["ref"]).is_first_distinct() * pl.col("total_bases")).sum()
         )
         .with_columns(
             over_zero=pl.when(pl.col("depth") > 0).then(pl.col("n_bases")).otherwise(0)
@@ -124,11 +124,12 @@ def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
             / pl.col("total_bases").over("ref")
         )
         .with_columns(
-            pct_total_over_zero=pl.col("over_zero").sum() / pl.col("total_bases").sum()
+            pct_total_over_zero=pl.col("over_zero").sum() 
+            / (pl.col(["ref"]).is_first_distinct() * pl.col("total_bases")).sum()
         )
         .with_columns(
             pct_total_over_thresh=pl.col("over_thresh").sum()
-            / pl.col("total_bases").sum()
+            / (pl.col(["ref"]).is_first_distinct() * pl.col("total_bases")).sum()
         )
         .select(pl.col("*").exclude("over_zero", "over_thresh", "cum_coverage"))
     )
