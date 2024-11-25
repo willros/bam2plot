@@ -154,9 +154,10 @@ def print_coverage_info(df, threshold: int) -> None:
 
 
 def print_total_reference_info(df, threshold: int) -> None:
-    print_blue(
-        f'[SUMMARIZE]: Mean coverage of all basepairs: {df["mean_coverage_total"][0]: .1f}X'
-    )
+    if df["mean_coverage_total"].shape[0] > 0:
+        print_blue(
+            f'[SUMMARIZE]: Mean coverage of all basepairs: {df["mean_coverage_total"][0]: .1f}X'
+        )
     print_blue(
         f'[SUMMARIZE]: Percent bases with coverage above 0X: {df["pct_total_over_zero"][0] * 100: .1f}%'
     )
