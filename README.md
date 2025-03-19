@@ -2,6 +2,10 @@
 
 Plot your bam files!
 
+## CITATION
+
+If you use bam2plot, please go [here](https://zenodo.org/records/15052225) to see how to cite!
+
 ## UPDATE
 `bam2plot` no longer depends on `perbase`. Now, `bam2plot` depends on [mosdepth](https://github.com/brentp/mosdepth)
 
