@@ -5,6 +5,9 @@ import platform
 import argparse
 import multiprocessing
 import warnings
+import base64
+import io
+from datetime import datetime
 
 import polars as pl
 import seaborn as sns
@@ -948,6 +951,125 @@ def save_plot_cum(cum_plot, outpath, bam, plot_type):
     print_green(f"[INFO]: Cumulative plot generated!")
 
 
+def _fig_to_base64(fig) -> str:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
+
+
+def generate_html_report(
+    sample_name: str,
+    bam: str,
+    threshold: int,
+    rolling_window: int,
+    df: pl.DataFrame,
+    top_refs: list,
+    coverage_figures: list,
+    cum_fig,
+    outpath: str,
+) -> None:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Global summary stats
+    first_row = df.row(0, named=True)
+    global_mean_cov = first_row["mean_coverage_total"]
+    global_pct_zero = first_row["pct_total_over_zero"] * 100
+    global_pct_thresh = first_row["pct_total_over_thresh"] * 100
+
+    # Per-reference stats
+    per_ref_rows = []
+    for ref in top_refs:
+        ref_df = df.filter(pl.col("ref") == ref)
+        row = ref_df.row(0, named=True)
+        per_ref_rows.append(
+            f"""<tr>
+            <td>{ref}</td>
+            <td>{row['total_bases']:,}</td>
+            <td>{row['mean_coverage']:.1f}X</td>
+            <td>{row['pct_over_zero'] * 100:.1f}%</td>
+            <td>{row['pct_over_thresh'] * 100:.1f}%</td>
+            </tr>"""
+        )
+    per_ref_html = "\n".join(per_ref_rows)
+
+    # Coverage plot sections
+    plot_sections = []
+    for ref_name, fig in coverage_figures:
+        b64 = _fig_to_base64(fig)
+        plot_sections.append(
+            f"""<div class="plot-section">
+            <h3>{ref_name}</h3>
+            <img src="data:image/png;base64,{b64}" alt="Coverage plot for {ref_name}">
+            </div>"""
+        )
+    plots_html = "\n".join(plot_sections)
+
+    # Cumulative plot
+    cum_html = ""
+    if cum_fig is not None:
+        cum_b64 = _fig_to_base64(cum_fig)
+        cum_html = f"""<div class="plot-section">
+        <h2>Cumulative Coverage</h2>
+        <img src="data:image/png;base64,{cum_b64}" alt="Cumulative coverage plot">
+        </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bam2plot Report — {sample_name}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; color: #333; }}
+.container {{ max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+h1 {{ color: #2c3e50; border-bottom: 2px solid #4A90E2; padding-bottom: 10px; }}
+h2 {{ color: #34495e; margin-top: 30px; }}
+h3 {{ color: #4A90E2; }}
+table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+th, td {{ padding: 10px 14px; text-align: left; border: 1px solid #ddd; }}
+th {{ background: #4A90E2; color: #fff; }}
+tr:nth-child(even) {{ background: #f9f9f9; }}
+.meta {{ color: #777; font-size: 0.9em; margin-bottom: 20px; }}
+.plot-section {{ margin: 20px 0; }}
+.plot-section img {{ max-width: 100%; height: auto; }}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>bam2plot Report</h1>
+<div class="meta">
+<p><strong>Sample:</strong> {sample_name} &nbsp;|&nbsp; <strong>BAM:</strong> {bam}</p>
+<p><strong>Threshold:</strong> {threshold}X &nbsp;|&nbsp; <strong>Rolling window:</strong> {rolling_window} nt &nbsp;|&nbsp; <strong>Generated:</strong> {timestamp}</p>
+</div>
+
+<h2>Global Summary</h2>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Mean coverage</td><td>{global_mean_cov:.1f}X</td></tr>
+<tr><td>Bases with coverage &gt; 0X</td><td>{global_pct_zero:.1f}%</td></tr>
+<tr><td>Bases with coverage &gt; {threshold}X</td><td>{global_pct_thresh:.1f}%</td></tr>
+</table>
+
+<h2>Per-Reference Statistics</h2>
+<table>
+<tr><th>Reference</th><th>Total bases</th><th>Mean coverage</th><th>&gt; 0X</th><th>&gt; {threshold}X</th></tr>
+{per_ref_html}
+</table>
+
+<h2>Coverage Plots</h2>
+{plots_html}
+
+{cum_html}
+</div>
+</body>
+</html>"""
+
+    report_path = Path(outpath) / f"{sample_name}_report.html"
+    report_path.write_text(html)
+    print_green(f"[INFO]: HTML report saved to {report_path.resolve()}")
+
+
 def main_from_bam(
     bam,
     outpath,
@@ -1009,6 +1131,7 @@ def main_from_bam(
     print_green(f"[INFO]: Generating {number_of_refs} {plot_text}:")
 
     top_n_refs = refs_with_most_coverage(df, n=number_of_refs)
+    coverage_figures = []
 
     for i, reference in enumerate(top_n_refs):
         df_to_plot = return_ref_for_plotting(df, reference, threshold, rolling_window)
@@ -1034,15 +1157,29 @@ def main_from_bam(
             rolling_window,
             sample_name,
         )
+        coverage_figures.append((reference, plot))
         plot_name = f"{i}_{sample_name}"
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
 
+    cum_fig = None
     if cum_plot:
         print_green("[INFO]: Generating cumulative coverage plots for each reference")
-        cum_plot = plot_cumulative_coverage_for_all(df, n=number_of_refs)
-        save_plot_cum(cum_plot, outpath, bam, plot_type)
+        cum_fig = plot_cumulative_coverage_for_all(df, n=number_of_refs)
+        save_plot_cum(cum_fig, outpath, bam, plot_type)
+
+    generate_html_report(
+        sample_name=sample_name,
+        bam=bam,
+        threshold=threshold,
+        rolling_window=rolling_window,
+        df=df,
+        top_refs=top_n_refs,
+        coverage_figures=coverage_figures,
+        cum_fig=cum_fig,
+        outpath=outpath,
+    )
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
     sys.exit(0)
