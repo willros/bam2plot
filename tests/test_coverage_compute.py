@@ -152,6 +152,7 @@ def test_enrich_coverage_df_schema(raw_df):
         "ref", "start", "end", "depth", "n_bases", "total_bases",
         "mean_coverage", "mean_coverage_total", "pct_over_zero",
         "pct_over_thresh", "pct_total_over_zero", "pct_total_over_thresh",
+        "median_coverage", "median_coverage_total", "gini_coefficient",
     }
     assert set(df.columns) == expected_cols
 
