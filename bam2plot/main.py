@@ -1,11 +1,9 @@
 from pathlib import Path
-import subprocess
 import sys
-from io import StringIO
-import _io
 import os
 import platform
 import argparse
+import multiprocessing
 import warnings
 
 import polars as pl
@@ -15,13 +13,12 @@ import pysam
 import mappy as mp
 import matplotlib.pyplot as plt
 import matplotlib
-import matplotlib.ticker as mtick
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 import pyfastx
 
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # for windows users
 if platform.system() == "Windows":
@@ -32,7 +29,11 @@ sns.set_theme()
 
 SORTED_TEMP = "TEMP112233.sorted.bam"
 SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
-MOSDEPTH_TEMP = "MOSDEPTH_TEMP"
+
+# Coverage plot color scheme
+COLOR_ZERO = "#FF6F61"   # red: 0X coverage
+COLOR_LOW = "#FFC107"    # yellow: below threshold
+COLOR_HIGH = "#4A90E2"   # blue: above threshold
 
 
 class bcolors:
@@ -64,38 +65,120 @@ def print_blue(text):
 def sort_bam(bam: str, new_name: str) -> None:
     try:
         pysam.sort("-o", new_name, bam)
-    except:
-        print_fail("[ERROR]: The bam file is broken or it is not a bam file!")
-        exit(1)
+    except Exception as e:
+        print_fail(f"[ERROR]: The bam file is broken or it is not a bam file! ({e})")
+        sys.exit(1)
 
 
 def index_bam(bam: str, new_name: str) -> None:
     try:
         pysam.index(bam, new_name)
-    except:
-        print_fail(
-            "[ERROR]: The file is not sorted or it is not a bam file! Run 'bam2plot <bam> -s'"
-        )
-        exit(1)
-
-
-def run_mosdepth(bam: str, threads: int = 1, mosdepth=MOSDEPTH_TEMP):
-    try:
-        subprocess.call(["mosdepth", "-x", "-t", str(threads), mosdepth, bam])
     except Exception as e:
-        print_fail("[ERROR]: Running mosdepth did not work. Is it installed?")
-        exit(1)
-
-
-def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
-    mosdepth = f"{mosdepth}.per-base.bed.gz"
-    df = (
-        pl.read_csv(
-            mosdepth,
-            separator="\t",
-            has_header=False,
-            new_columns=["ref", "start", "end", "depth"],
+        print_fail(
+            f"[ERROR]: The file is not sorted or it is not a bam file! Run 'bam2plot <bam> -s' ({e})"
         )
+        sys.exit(1)
+
+
+_FILTER_FLAGS = 0x4 | 0x100 | 0x200 | 0x400  # unmapped | secondary | qcfail | duplicate
+
+
+def _sweep_one_ref(args):
+    """Compute RLE coverage for a single reference (worker for parallel dispatch)."""
+    bam, ref_name, ref_len = args
+    af = pysam.AlignmentFile(bam, "rb")
+    arr = np.zeros(ref_len + 1, dtype=np.int32)
+    for read in af.fetch(ref_name):
+        if read.flag & _FILTER_FLAGS:
+            continue
+        arr[read.reference_start] += 1
+        arr[read.reference_end] -= 1
+    af.close()
+    depth = np.cumsum(arr[:-1])
+    return _rle_encode(ref_name, depth)
+
+
+def _rle_encode(ref_name, depth):
+    """Run-length encode a per-position depth array."""
+    if len(depth) == 0:
+        return (ref_name, np.array([], dtype=np.int64), np.array([], dtype=np.int64), np.array([], dtype=np.int64))
+    changes = np.diff(depth, prepend=depth[0] - 1)
+    starts = np.where(changes != 0)[0]
+    ends = np.append(starts[1:], len(depth))
+    depths = depth[starts]
+    return (ref_name, starts.astype(np.int64), ends.astype(np.int64), depths.astype(np.int64))
+
+
+def _results_to_dataframe(results):
+    """Concatenate per-reference RLE tuples into a single DataFrame."""
+    all_rows = []
+    for ref_name, starts, ends, depths in results:
+        if len(starts) == 0:
+            continue
+        ref_col = np.full(len(starts), ref_name, dtype=object)
+        all_rows.append((ref_col, starts, ends, depths))
+    if not all_rows:
+        return pl.DataFrame(
+            schema={"ref": pl.Utf8, "start": pl.Int64, "end": pl.Int64, "depth": pl.Int64}
+        )
+    return pl.DataFrame({
+        "ref": np.concatenate([r[0] for r in all_rows]),
+        "start": np.concatenate([r[1] for r in all_rows]),
+        "end": np.concatenate([r[2] for r in all_rows]),
+        "depth": np.concatenate([r[3] for r in all_rows]),
+    })
+
+
+def bam_to_raw_df(bam: str) -> pl.DataFrame:
+    """Compute per-base coverage from a BAM file.
+
+    For indexed BAMs, parallelizes across references using multiprocessing.
+    Falls back to sequential sweep-line for unindexed BAMs.
+    Filters secondary, qcfail, and duplicate reads (matching mosdepth/samtools defaults).
+
+    Returns a 4-column DataFrame: ref, start, end, depth (run-length encoded).
+    """
+    af = pysam.AlignmentFile(bam, "rb")
+    ref_names = list(af.references)
+    ref_lens = list(af.lengths)
+    has_index = af.has_index()
+    af.close()
+
+    n_refs = len(ref_names)
+    args = [(bam, ref_names[i], ref_lens[i]) for i in range(n_refs)]
+
+    if has_index and n_refs > 1:
+        n_workers = min(n_refs, os.cpu_count() or 1, 4)
+        with multiprocessing.Pool(n_workers) as pool:
+            results = pool.map(_sweep_one_ref, args)
+    else:
+        # Sequential: single pass for unindexed BAMs or single-ref BAMs
+        if has_index:
+            results = [_sweep_one_ref(a) for a in args]
+        else:
+            arrays = [np.zeros(ref_lens[i] + 1, dtype=np.int32) for i in range(n_refs)]
+            af = pysam.AlignmentFile(bam, "rb")
+            for read in af:
+                if read.flag & _FILTER_FLAGS:
+                    continue
+                arrays[read.reference_id][read.reference_start] += 1
+                arrays[read.reference_id][read.reference_end] -= 1
+            af.close()
+            results = [
+                _rle_encode(ref_names[i], np.cumsum(arrays[i][:-1]))
+                for i in range(n_refs)
+            ]
+
+    return _results_to_dataframe(results)
+
+
+def enrich_coverage_df(raw_df: pl.DataFrame, thresh: int) -> pl.DataFrame:
+    """Add coverage statistics columns to a raw (ref, start, end, depth) DataFrame.
+
+    Returns the 12-column schema expected by all downstream code.
+    """
+    return (
+        raw_df
         .with_columns(n_bases=pl.col("end") - pl.col("start"))
         .with_columns(cum_coverage=pl.col("n_bases") * pl.col("depth"))
         .with_columns(total_bases=pl.col("n_bases").sum().over("ref"))
@@ -124,7 +207,7 @@ def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
             / pl.col("total_bases").over("ref")
         )
         .with_columns(
-            pct_total_over_zero=pl.col("over_zero").sum() 
+            pct_total_over_zero=pl.col("over_zero").sum()
             / (pl.col(["ref"]).is_first_distinct() * pl.col("total_bases")).sum()
         )
         .with_columns(
@@ -133,13 +216,6 @@ def mosdepth_to_df(thresh: int, mosdepth=MOSDEPTH_TEMP) -> pl.DataFrame:
         )
         .select(pl.col("*").exclude("over_zero", "over_thresh", "cum_coverage"))
     )
-
-    os.remove("MOSDEPTH_TEMP.per-base.bed.gz.csi")
-    os.remove("MOSDEPTH_TEMP.mosdepth.summary.txt")
-    os.remove("MOSDEPTH_TEMP.mosdepth.global.dist.txt")
-    os.remove("MOSDEPTH_TEMP.per-base.bed.gz")
-
-    return df
 
 
 def print_coverage_info(df, threshold: int) -> None:
@@ -204,31 +280,10 @@ def return_ref_for_plotting(df, ref, thresh, rolling_window: int = None):
         .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
         .with_columns(
             zero=pl.when(pl.col("rolling") == 0)
-            .then(pl.lit("#FF6F61"))
+            .then(pl.lit(COLOR_ZERO))
             .when(pl.col("rolling") > thresh)
-            .then(pl.lit("#4A90E2"))
-            .otherwise(pl.lit("#FFC107"))
-        )
-        .fill_null(0)
-        .with_row_index()
-        .filter(pl.col("index") % modulo == 0)
-    )
-
-    df = df.sort("start")
-    if rolling_window is None:
-        rolling_window = df["total_bases"][0] // 100_000
-    modulo = df["total_bases"][0] // 1000
-    return (
-        df.filter(pl.col("ref") == ref)
-        .with_columns(pos=pl.int_ranges(start="start", end="end"))
-        .explode(pl.col("pos"))
-        .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
-        .with_columns(
-            zero=pl.when(pl.col("rolling") == 0)
-            .then(pl.lit("#FF6F61"))
-            .when(pl.col("rolling") > thresh)
-            .then(pl.lit("#4A90E2"))
-            .otherwise(pl.lit("#FFC107"))
+            .then(pl.lit(COLOR_HIGH))
+            .otherwise(pl.lit(COLOR_LOW))
         )
         .fill_null(0)
         .with_row_index()
@@ -263,9 +318,9 @@ def coverage_plot(
     ax.set_ylim(-1, y.max())
 
     legend_elements = [
-        Line2D([0], [0], color="#FF6F61", lw=1, label="0X"),
-        Line2D([0], [0], color="#FFC107", lw=1, label="Over 0X"),
-        Line2D([0], [0], color="#4A90E2", lw=1, label=f"Over {thresh}X"),
+        Line2D([0], [0], color=COLOR_ZERO, lw=1, label="0X"),
+        Line2D([0], [0], color=COLOR_LOW, lw=1, label="Over 0X"),
+        Line2D([0], [0], color=COLOR_HIGH, lw=1, label=f"Over {thresh}X"),
     ]
     ax.legend(handles=legend_elements, loc="upper right")
 
@@ -423,7 +478,7 @@ def main_guci(
     print_green(f"[INFO]: Guci plot done!")
     print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
 
-    exit(0)
+    sys.exit(0)
 
 
 def bam2plot_from_reads():
@@ -499,9 +554,8 @@ def map_fastq_to_ref_long_read(fastq, ref, preset="map-ont") -> pl.DataFrame:
 
         test += 1
         if test > 1000:
-            print("NO ALIGNMENT TO THIS REFERENCE")
-            return
-            break
+            print_fail("[ERROR]: No alignment to this reference")
+            return None
 
     df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
 
@@ -549,8 +603,8 @@ def PE_reads_to_df(read_1, read_2) -> pl.DataFrame:
             .select(pl.col("seq_1"), pl.col("seq_2"))
         )
 
-    except:
-        print_fail("fastq files do not match up!")
+    except Exception as e:
+        print_fail(f"[ERROR]: fastq files do not match up! ({e})")
         sys.exit(1)
 
 
@@ -648,7 +702,7 @@ def plot_gc(df, title):
     plt.plot(df["position"], df["rolling_gc"])
     plt.gca().set_yticklabels([f"{x:.0%}" for x in plt.gca().get_yticks()])
     plt.gca().xaxis.set_major_formatter(
-        plt.matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
+        matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
     )
     plt.ylabel("% GC content")
     plt.xlabel("Position")
@@ -663,7 +717,7 @@ def files_not_exists(*files):
             continue
         if not Path(file).exists():
             print_fail(f"[ERROR]: The file {file} does not exist")
-            exit(1)
+            sys.exit(1)
 
 
 def main_from_reads(
@@ -718,7 +772,7 @@ def main_from_reads(
     print_green(f"[INFO]: Coverage plot done!")
     print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
 
-    exit(0)
+    sys.exit(0)
 
 
 def check_range(value):
@@ -831,48 +885,34 @@ def bam2plot_from_bam():
     )
 
 
-def if_sort_and_index(sort_and_index, index, bam) -> None:
-    if not sort_and_index and not index:
-        run_mosdepth(bam)
-
+def if_sort_and_index(sort_and_index, index, bam) -> str:
+    """Optionally sort/index the BAM and return the path to use for coverage."""
     if sort_and_index:
         print_green("[INFO]: Sorting bam file")
         sort_bam(bam, new_name=SORTED_TEMP)
         print_green("[INFO]: Indexing bam file")
         index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
+        return SORTED_TEMP
+
     if index:
         print_green("[INFO]: Indexing bam file")
-        index_name = f"{bam}.bai"
-        index_bam(bam, new_name=index_name)
+        index_bam(bam, new_name=f"{bam}.bai")
 
-    try:
-        if sort_and_index:
-            run_mosdepth(SORTED_TEMP)
-        if index:
-            run_mosdepth(bam)
-    except:
-        print_fail("[ERROR]: Could not run mosdepth on bam file")
-        exit(1)
-    finally:
-        if sort_and_index:
-            os.remove(SORTED_TEMP)
-            os.remove(SORTED_TEMP_INDEX)
-        if index:
-            os.remove(index_name)
+    return bam
 
 
-def process_dataframe(sort_and_index, index, threshold):
+def process_dataframe(bam, threshold):
     try:
         print_green("[INFO]: Processing dataframe")
-        df = mosdepth_to_df(threshold)
+        raw_df = bam_to_raw_df(bam)
+        df = enrich_coverage_df(raw_df, threshold)
         return df
-    except:
-        print_fail(f"[ERROR]: Could not process dataframe")
-        if not (sort_and_index or index):
-            print_warning(
-                "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
-            )
-            sys.exit(1)
+    except Exception as e:
+        print_fail(f"[ERROR]: Could not process dataframe ({e})")
+        print_warning(
+            "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
+        )
+        sys.exit(1)
 
 
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
@@ -924,22 +964,33 @@ def main_from_bam(
     print_green(f"[INFO]: Running bam2plot from_bam!")
 
     if zoom:
-        start = int(zoom.split(" ")[0])
-        end = int(zoom.split(" ")[1])
+        try:
+            parts = zoom.split(" ")
+            start = int(parts[0])
+            end = int(parts[1])
+        except (IndexError, ValueError):
+            print_fail("[ERROR]: Invalid zoom format. Use: -z='100 2000'")
+            sys.exit(1)
         if start >= end:
             print_fail("[ERROR]: Start value of zoom must be lower than end value.")
-            exit(1)
+            sys.exit(1)
 
     if not Path(bam).exists():
         print_fail(f"[ERROR]: The file {bam} does not exist")
-        exit(1)
+        sys.exit(1)
 
     make_dir(outpath)
     sample_name = Path(bam).stem
 
-    if_sort_and_index(sort_and_index, index, bam)
-
-    df = process_dataframe(sort_and_index, index, threshold)
+    effective_bam = if_sort_and_index(sort_and_index, index, bam)
+    try:
+        df = process_dataframe(effective_bam, threshold)
+    finally:
+        if sort_and_index:
+            Path(SORTED_TEMP).unlink(missing_ok=True)
+            Path(SORTED_TEMP_INDEX).unlink(missing_ok=True)
+        if index:
+            Path(f"{bam}.bai").unlink(missing_ok=True)
 
     print_total_reference_info(df, threshold)
 
@@ -952,7 +1003,7 @@ def main_from_bam(
 
     if number_of_refs == 0:
         print_fail("[ERROR]: No reference to plot against!")
-        exit(1)
+        sys.exit(1)
 
     plot_text = "plot" if number_of_refs == 1 else "plots"
     print_green(f"[INFO]: Generating {number_of_refs} {plot_text}:")
@@ -994,7 +1045,7 @@ def main_from_bam(
         save_plot_cum(cum_plot, outpath, bam, plot_type)
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
-    exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
