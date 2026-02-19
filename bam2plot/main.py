@@ -4,6 +4,7 @@ import os
 import platform
 import argparse
 import multiprocessing
+import tempfile
 import warnings
 import base64
 import io
@@ -30,9 +31,6 @@ if platform.system() == "Windows":
 sns.set_theme()
 
 
-SORTED_TEMP = "TEMP112233.sorted.bam"
-SORTED_TEMP_INDEX = f"{SORTED_TEMP}.bai"
-
 # Coverage plot color scheme
 COLOR_ZERO = "#FF6F61"   # red: 0X coverage
 COLOR_LOW = "#FFC107"    # yellow: below threshold
@@ -41,7 +39,6 @@ COLOR_HIGH = "#4A90E2"   # blue: above threshold
 
 class bcolors:
     OKBLUE = "\033[94m"
-    OKCYAN = "\033[96m"
     OKGREEN = "\033[92m"
     WARNING = "\033[93m"
     FAIL = "\033[91m"
@@ -175,12 +172,34 @@ def bam_to_raw_df(bam: str) -> pl.DataFrame:
     return _results_to_dataframe(results)
 
 
+def extract_insert_sizes(bam: str):
+    """Extract insert sizes from a BAM file.
+
+    Only considers read1 (flag 0x40) with template_length > 0 to avoid
+    double-counting pairs. Returns a numpy array of insert sizes, or None
+    if no paired-end data is found.
+    """
+    af = pysam.AlignmentFile(bam, "rb")
+    sizes = []
+    for read in af:
+        if read.flag & _FILTER_FLAGS:
+            continue
+        # Only read1 of a pair with positive template length
+        if (read.flag & 0x1) and (read.flag & 0x40) and read.template_length > 0:
+            sizes.append(read.template_length)
+    af.close()
+    if not sizes:
+        return None
+    return np.array(sizes, dtype=np.int64)
+
+
 def enrich_coverage_df(raw_df: pl.DataFrame, thresh: int) -> pl.DataFrame:
     """Add coverage statistics columns to a raw (ref, start, end, depth) DataFrame.
 
-    Returns the 12-column schema expected by all downstream code.
+    Returns a 15-column schema: the original 12 columns plus
+    median_coverage, median_coverage_total, and gini_coefficient.
     """
-    return (
+    base = (
         raw_df
         .with_columns(n_bases=pl.col("end") - pl.col("start"))
         .with_columns(cum_coverage=pl.col("n_bases") * pl.col("depth"))
@@ -220,6 +239,75 @@ def enrich_coverage_df(raw_df: pl.DataFrame, thresh: int) -> pl.DataFrame:
         .select(pl.col("*").exclude("over_zero", "over_thresh", "cum_coverage"))
     )
 
+    # Compute per-ref median and Gini from RLE data
+    ref_stats = []
+    for ref_name in base["ref"].unique().to_list():
+        ref_rows = base.filter(pl.col("ref") == ref_name)
+        depths = ref_rows["depth"].to_numpy()
+        weights = ref_rows["n_bases"].to_numpy()
+        median = weighted_median_rle(depths, weights)
+        gini = compute_gini_rle(depths, weights)
+        ref_stats.append({"ref": ref_name, "median_coverage": median, "gini_coefficient": gini})
+
+    stats_df = pl.DataFrame(ref_stats)
+    base = base.join(stats_df, on="ref", how="left")
+
+    # Global median across all bases
+    all_depths = base.unique(subset=["ref", "start"])["depth"].to_numpy()
+    all_weights = base.unique(subset=["ref", "start"])["n_bases"].to_numpy()
+    global_median = weighted_median_rle(all_depths, all_weights)
+    base = base.with_columns(median_coverage_total=pl.lit(global_median))
+
+    return base
+
+
+def weighted_median_rle(depths: np.ndarray, weights: np.ndarray) -> float:
+    """Compute weighted median from RLE depths and their interval lengths."""
+    if len(depths) == 0:
+        return 0.0
+    order = np.argsort(depths)
+    sorted_depths = depths[order]
+    sorted_weights = weights[order]
+    cum = np.cumsum(sorted_weights)
+    total = cum[-1]
+    if total == 0:
+        return 0.0
+    idx = np.searchsorted(cum, total / 2.0)
+    return float(sorted_depths[min(idx, len(sorted_depths) - 1)])
+
+
+def compute_lorenz_data_rle(depths: np.ndarray, weights: np.ndarray) -> tuple:
+    """Compute Lorenz curve from RLE depths and interval lengths.
+
+    Returns (x, y) numpy arrays where x = cumulative fraction of bases,
+    y = cumulative fraction of total coverage. Both include origin (0,0).
+    """
+    if len(depths) == 0:
+        return np.array([0.0, 1.0]), np.array([0.0, 1.0])
+    order = np.argsort(depths)
+    sorted_depths = depths[order]
+    sorted_weights = weights[order]
+    cum_bases = np.cumsum(sorted_weights)
+    total_bases = cum_bases[-1]
+    if total_bases == 0:
+        return np.array([0.0, 1.0]), np.array([0.0, 1.0])
+    cum_coverage = np.cumsum(sorted_depths * sorted_weights)
+    total_coverage = cum_coverage[-1]
+    x = np.concatenate([[0.0], cum_bases / total_bases])
+    if total_coverage == 0:
+        # All depths are zero → perfectly "equal" (all zero), return diagonal
+        y = x.copy()
+    else:
+        y = np.concatenate([[0.0], cum_coverage / total_coverage])
+    return x, y
+
+
+def compute_gini_rle(depths: np.ndarray, weights: np.ndarray) -> float:
+    """Compute Gini coefficient from RLE depths and interval lengths."""
+    x, y = compute_lorenz_data_rle(depths, weights)
+    _trapz = getattr(np, "trapezoid", np.trapz)
+    return float(1.0 - 2.0 * _trapz(y, x))
+
 
 def print_coverage_info(df, threshold: int) -> None:
     print_blue(f'[SUMMARIZE]: Coverage information for: {df["ref"][0]}')
@@ -230,12 +318,18 @@ def print_coverage_info(df, threshold: int) -> None:
         f'[SUMMARIZE]: Percent bases with coverage above {threshold}X: {df["pct_over_thresh"][0] * 100: .1f}%'
     )
     print_blue(f'   [SUMMARIZE]: mean coverage: {df["mean_coverage"][0]: .1f}X')
+    if "median_coverage" in df.columns:
+        print_blue(f'   [SUMMARIZE]: median coverage: {df["median_coverage"][0]: .1f}X')
 
 
 def print_total_reference_info(df, threshold: int) -> None:
     if df["mean_coverage_total"].shape[0] > 0:
         print_blue(
             f'[SUMMARIZE]: Mean coverage of all basepairs: {df["mean_coverage_total"][0]: .1f}X'
+        )
+    if "median_coverage_total" in df.columns and df["median_coverage_total"].shape[0] > 0:
+        print_blue(
+            f'[SUMMARIZE]: Median coverage of all basepairs: {df["median_coverage_total"][0]: .1f}X'
         )
     print_blue(
         f'[SUMMARIZE]: Percent bases with coverage above 0X: {df["pct_total_over_zero"][0] * 100: .1f}%'
@@ -265,30 +359,31 @@ def refs_with_most_coverage(df, n=None) -> list:
 
 def return_ref_for_plotting(df, ref, thresh, rolling_window: int = None):
 
-    if df.filter(pl.col("ref") == ref)["total_bases"][0] < 10_000:
+    ref_df = df.filter(pl.col("ref") == ref)
+    total_bases = ref_df["total_bases"][0]
+
+    if total_bases < 10_000:
         rolling_window = 1
         modulo = 1
     else:
         if rolling_window is None:
-            rolling_window = (
-                df.filter(pl.col("ref") == ref)["total_bases"][0] // 100_000
-            )
-        modulo = df.filter(pl.col("ref") == ref)["total_bases"][0] // 1000
+            rolling_window = max(total_bases // 100_000, 1)
+        modulo = total_bases // 1000
 
     return (
-        df.filter(pl.col("ref") == ref)
+        ref_df
         .sort("start")
         .with_columns(pos=pl.int_ranges(start="start", end="end"))
         .explode(pl.col("pos"))
         .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
+        .with_columns(rolling=pl.col("rolling").fill_null(0))
         .with_columns(
-            zero=pl.when(pl.col("rolling") == 0)
+            color=pl.when(pl.col("rolling") == 0)
             .then(pl.lit(COLOR_ZERO))
             .when(pl.col("rolling") > thresh)
             .then(pl.lit(COLOR_HIGH))
             .otherwise(pl.lit(COLOR_LOW))
         )
-        .fill_null(0)
         .with_row_index()
         .filter(pl.col("index") % modulo == 0)
     )
@@ -316,7 +411,6 @@ def coverage_plot(
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.add_collection(lc)
-    # ax.autoscale()
     ax.set_xlim(x.min(), x.max())
     ax.set_ylim(-1, y.max())
 
@@ -380,6 +474,99 @@ def plot_cumulative_coverage_for_all(df, n):
     return grid.fig
 
 
+def plot_depth_histogram(df, ref, n_bins=50):
+    """Plot a weighted depth histogram for a single reference."""
+    ref_df = df.filter(pl.col("ref") == ref)
+    depths = ref_df["depth"].to_numpy().astype(float)
+    weights = ref_df["n_bases"].to_numpy().astype(float)
+    mean_cov = ref_df["mean_coverage"][0]
+    median_cov = ref_df["median_coverage"][0]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(depths, bins=n_bins, weights=weights, color=COLOR_HIGH, edgecolor="white", alpha=0.85)
+    ax.axvline(mean_cov, color=COLOR_ZERO, linestyle="--", linewidth=1.5, label=f"Mean: {mean_cov:.1f}X")
+    ax.axvline(median_cov, color=COLOR_LOW, linestyle="--", linewidth=1.5, label=f"Median: {median_cov:.1f}X")
+    ax.set_xlabel("Depth")
+    ax.set_ylabel("Number of bases")
+    ax.set_title(f"Depth Distribution — {ref}")
+    ax.legend()
+    plt.close(fig)
+    return fig
+
+
+def plot_depth_histogram_global(df, top_refs, n_bins=50):
+    """Plot a weighted depth histogram aggregated across top references."""
+    filtered = df.filter(pl.col("ref").is_in(top_refs))
+    # Deduplicate to unique intervals
+    unique_rows = filtered.unique(subset=["ref", "start"])
+    depths = unique_rows["depth"].to_numpy().astype(float)
+    weights = unique_rows["n_bases"].to_numpy().astype(float)
+    mean_cov = filtered["mean_coverage_total"][0]
+    median_cov = filtered["median_coverage_total"][0]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(depths, bins=n_bins, weights=weights, color=COLOR_HIGH, edgecolor="white", alpha=0.85)
+    ax.axvline(mean_cov, color=COLOR_ZERO, linestyle="--", linewidth=1.5, label=f"Mean: {mean_cov:.1f}X")
+    ax.axvline(median_cov, color=COLOR_LOW, linestyle="--", linewidth=1.5, label=f"Median: {median_cov:.1f}X")
+    ax.set_xlabel("Depth")
+    ax.set_ylabel("Number of bases")
+    ax.set_title("Depth Distribution — All References")
+    ax.legend()
+    plt.close(fig)
+    return fig
+
+
+def plot_lorenz_curves(df, top_refs):
+    """Plot Lorenz curves for coverage uniformity across top references."""
+    records = []
+    for ref in top_refs:
+        ref_df = df.filter(pl.col("ref") == ref)
+        depths = ref_df["depth"].to_numpy()
+        weights = ref_df["n_bases"].to_numpy()
+        gini = compute_gini_rle(depths, weights)
+        x, y = compute_lorenz_data_rle(depths, weights)
+        _id = ref[:20]
+        for xi, yi in zip(x, y):
+            records.append({"id": _id, "frac_bases": xi, "frac_coverage": yi, "gini": gini})
+
+    lorenz_df = pl.DataFrame(records)
+
+    grid = sns.FacetGrid(lorenz_df, col="id", height=2.5, col_wrap=5)
+
+    def _plot_lorenz(data, **kwargs):
+        ax = plt.gca()
+        ax.plot(data["frac_bases"], data["frac_coverage"], color=COLOR_HIGH, linewidth=2)
+        ax.plot([0, 1], [0, 1], color="#999999", linestyle="--", linewidth=1)
+        gini_val = data["gini"].iloc[0]
+        ax.text(0.05, 0.9, f"Gini={gini_val:.3f}", transform=ax.transAxes, fontsize=8)
+
+    grid.map_dataframe(_plot_lorenz)
+    plt.close()
+    return grid.fig
+
+
+def plot_insert_size_distribution(insert_sizes, sample_name, n_bins=100):
+    """Plot insert size histogram with mean/median annotations."""
+    mean_val = float(np.mean(insert_sizes))
+    median_val = float(np.median(insert_sizes))
+    std_val = float(np.std(insert_sizes))
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(insert_sizes, bins=n_bins, color=COLOR_HIGH, edgecolor="white", alpha=0.85)
+    ax.axvline(mean_val, color=COLOR_ZERO, linestyle="--", linewidth=1.5, label=f"Mean: {mean_val:.0f}")
+    ax.axvline(median_val, color=COLOR_LOW, linestyle="--", linewidth=1.5, label=f"Median: {median_val:.0f}")
+    stats_text = f"N={len(insert_sizes):,}\nMean={mean_val:.0f}\nMedian={median_val:.0f}\nStd={std_val:.0f}"
+    ax.text(0.95, 0.95, stats_text, transform=ax.transAxes, fontsize=9,
+            verticalalignment="top", horizontalalignment="right",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+    ax.set_xlabel("Insert Size (bp)")
+    ax.set_ylabel("Count")
+    ax.set_title(f"Insert Size Distribution — {sample_name}")
+    ax.legend()
+    plt.close(fig)
+    return fig
+
+
 def make_dir(outpath: str) -> None:
     outpath = Path(outpath)
     if not outpath.exists():
@@ -413,9 +600,6 @@ def cli():
         bam2plot_from_reads()
     elif sub_command == "guci":
         bam2plot_guci()
-
-    else:
-        sys.exit(0)
 
 
 def bam2plot_guci():
@@ -888,20 +1072,28 @@ def bam2plot_from_bam():
     )
 
 
-def if_sort_and_index(sort_and_index, index, bam) -> str:
-    """Optionally sort/index the BAM and return the path to use for coverage."""
+def if_sort_and_index(sort_and_index, index, bam):
+    """Optionally sort/index the BAM and return (effective_bam, temp_files_to_cleanup)."""
+    temp_files = []
     if sort_and_index:
+        tmp = tempfile.NamedTemporaryFile(suffix=".sorted.bam", delete=False)
+        tmp.close()
+        sorted_path = tmp.name
+        index_path = f"{sorted_path}.bai"
         print_green("[INFO]: Sorting bam file")
-        sort_bam(bam, new_name=SORTED_TEMP)
+        sort_bam(bam, new_name=sorted_path)
         print_green("[INFO]: Indexing bam file")
-        index_bam(SORTED_TEMP, new_name=SORTED_TEMP_INDEX)
-        return SORTED_TEMP
+        index_bam(sorted_path, new_name=index_path)
+        temp_files = [sorted_path, index_path]
+        return sorted_path, temp_files
 
     if index:
         print_green("[INFO]: Indexing bam file")
-        index_bam(bam, new_name=f"{bam}.bai")
+        index_path = f"{bam}.bai"
+        index_bam(bam, new_name=index_path)
+        temp_files = [index_path]
 
-    return bam
+    return bam, temp_files
 
 
 def process_dataframe(bam, threshold):
@@ -916,6 +1108,14 @@ def process_dataframe(bam, threshold):
             "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
         )
         sys.exit(1)
+
+
+def _save_plot(fig, path: str, plot_type: str):
+    """Save a figure to disk in the requested format(s)."""
+    if plot_type in ("png", "both"):
+        fig.savefig(f"{path}.png", bbox_inches="tight")
+    if plot_type in ("svg", "both"):
+        fig.savefig(f"{path}.svg", bbox_inches="tight")
 
 
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
@@ -968,6 +1168,11 @@ def generate_html_report(
     coverage_figures: list,
     cum_fig,
     outpath: str,
+    depth_hist_figures: list = None,
+    global_depth_hist_fig=None,
+    lorenz_fig=None,
+    insert_size_fig=None,
+    insert_size_stats: dict = None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -976,22 +1181,35 @@ def generate_html_report(
     global_mean_cov = first_row["mean_coverage_total"]
     global_pct_zero = first_row["pct_total_over_zero"] * 100
     global_pct_thresh = first_row["pct_total_over_thresh"] * 100
+    global_median_cov = first_row.get("median_coverage_total", None)
+
+    global_median_row = ""
+    if global_median_cov is not None:
+        global_median_row = f"<tr><td>Median coverage</td><td>{global_median_cov:.1f}X</td></tr>"
 
     # Per-reference stats
     per_ref_rows = []
+    has_median = "median_coverage" in df.columns
+    has_gini = "gini_coefficient" in df.columns
     for ref in top_refs:
         ref_df = df.filter(pl.col("ref") == ref)
         row = ref_df.row(0, named=True)
+        median_td = f"<td>{row['median_coverage']:.1f}X</td>" if has_median else ""
+        gini_td = f"<td>{row['gini_coefficient']:.3f}</td>" if has_gini else ""
         per_ref_rows.append(
             f"""<tr>
             <td>{ref}</td>
             <td>{row['total_bases']:,}</td>
             <td>{row['mean_coverage']:.1f}X</td>
+            {median_td}
             <td>{row['pct_over_zero'] * 100:.1f}%</td>
             <td>{row['pct_over_thresh'] * 100:.1f}%</td>
+            {gini_td}
             </tr>"""
         )
     per_ref_html = "\n".join(per_ref_rows)
+    median_th = "<th>Median coverage</th>" if has_median else ""
+    gini_th = "<th>Gini</th>" if has_gini else ""
 
     # Coverage plot sections
     plot_sections = []
@@ -1012,6 +1230,54 @@ def generate_html_report(
         cum_html = f"""<div class="plot-section">
         <h2>Cumulative Coverage</h2>
         <img src="data:image/png;base64,{cum_b64}" alt="Cumulative coverage plot">
+        </div>"""
+
+    # Depth distribution section
+    depth_html = ""
+    if depth_hist_figures or global_depth_hist_fig:
+        depth_html = '<h2>Depth Distribution</h2>'
+        if global_depth_hist_fig is not None:
+            b64 = _fig_to_base64(global_depth_hist_fig)
+            depth_html += f"""<div class="plot-section">
+            <h3>All References</h3>
+            <img src="data:image/png;base64,{b64}" alt="Global depth histogram">
+            </div>"""
+        if depth_hist_figures:
+            for ref_name, fig in depth_hist_figures:
+                b64 = _fig_to_base64(fig)
+                depth_html += f"""<div class="plot-section">
+                <h3>{ref_name}</h3>
+                <img src="data:image/png;base64,{b64}" alt="Depth histogram for {ref_name}">
+                </div>"""
+
+    # Lorenz curves section
+    lorenz_html = ""
+    if lorenz_fig is not None:
+        lorenz_b64 = _fig_to_base64(lorenz_fig)
+        lorenz_html = f"""<div class="plot-section">
+        <h2>Coverage Uniformity</h2>
+        <img src="data:image/png;base64,{lorenz_b64}" alt="Lorenz curves">
+        </div>"""
+
+    # Insert size section
+    insert_html = ""
+    if insert_size_fig is not None:
+        is_b64 = _fig_to_base64(insert_size_fig)
+        stats_table = ""
+        if insert_size_stats:
+            stats_table = f"""<table>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Read pairs</td><td>{insert_size_stats['count']:,}</td></tr>
+            <tr><td>Mean insert size</td><td>{insert_size_stats['mean']:.0f} bp</td></tr>
+            <tr><td>Median insert size</td><td>{insert_size_stats['median']:.0f} bp</td></tr>
+            <tr><td>Std deviation</td><td>{insert_size_stats['std']:.0f} bp</td></tr>
+            <tr><td>Min</td><td>{insert_size_stats['min']:,} bp</td></tr>
+            <tr><td>Max</td><td>{insert_size_stats['max']:,} bp</td></tr>
+            </table>"""
+        insert_html = f"""<div class="plot-section">
+        <h2>Insert Size Distribution</h2>
+        {stats_table}
+        <img src="data:image/png;base64,{is_b64}" alt="Insert size distribution">
         </div>"""
 
     html = f"""<!DOCTYPE html>
@@ -1047,13 +1313,14 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 <table>
 <tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Mean coverage</td><td>{global_mean_cov:.1f}X</td></tr>
+{global_median_row}
 <tr><td>Bases with coverage &gt; 0X</td><td>{global_pct_zero:.1f}%</td></tr>
 <tr><td>Bases with coverage &gt; {threshold}X</td><td>{global_pct_thresh:.1f}%</td></tr>
 </table>
 
 <h2>Per-Reference Statistics</h2>
 <table>
-<tr><th>Reference</th><th>Total bases</th><th>Mean coverage</th><th>&gt; 0X</th><th>&gt; {threshold}X</th></tr>
+<tr><th>Reference</th><th>Total bases</th><th>Mean coverage</th>{median_th}<th>&gt; 0X</th><th>&gt; {threshold}X</th>{gini_th}</tr>
 {per_ref_html}
 </table>
 
@@ -1061,6 +1328,12 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 {plots_html}
 
 {cum_html}
+
+{depth_html}
+
+{lorenz_html}
+
+{insert_html}
 </div>
 </body>
 </html>"""
@@ -1104,24 +1377,24 @@ def main_from_bam(
     make_dir(outpath)
     sample_name = Path(bam).stem
 
-    effective_bam = if_sort_and_index(sort_and_index, index, bam)
+    effective_bam, temp_files = if_sort_and_index(sort_and_index, index, bam)
     try:
         df = process_dataframe(effective_bam, threshold)
     finally:
-        if sort_and_index:
-            Path(SORTED_TEMP).unlink(missing_ok=True)
-            Path(SORTED_TEMP_INDEX).unlink(missing_ok=True)
-        if index:
-            Path(f"{bam}.bai").unlink(missing_ok=True)
+        for tmp in temp_files:
+            Path(tmp).unlink(missing_ok=True)
 
     print_total_reference_info(df, threshold)
 
     if whitelist:
-        whitelist = [whitelist] if type(whitelist) == str else whitelist
+        whitelist = [whitelist] if isinstance(whitelist, str) else whitelist
         print_green(
             f"[INFO]: Only looking for references in the whitelist: {whitelist}"
         )
         df = df.filter(pl.col("ref").is_in(whitelist))
+        if df.is_empty():
+            print_fail("[ERROR]: No references matched the whitelist")
+            sys.exit(1)
 
     if number_of_refs == 0:
         print_fail("[ERROR]: No reference to plot against!")
@@ -1152,13 +1425,12 @@ def main_from_bam(
             df_to_plot,
             "pos",
             "rolling",
-            "zero",
+            "color",
             threshold,
             rolling_window,
             sample_name,
         )
         coverage_figures.append((reference, plot))
-        plot_name = f"{i}_{sample_name}"
         save_plot_coverage(plot, outpath, sample_name, reference, plot_type)
 
     print_green("[INFO]: Coverage plots done!")
@@ -1168,6 +1440,42 @@ def main_from_bam(
         print_green("[INFO]: Generating cumulative coverage plots for each reference")
         cum_fig = plot_cumulative_coverage_for_all(df, n=number_of_refs)
         save_plot_cum(cum_fig, outpath, bam, plot_type)
+
+    # Depth histograms
+    print_green("[INFO]: Generating depth distribution histograms")
+    depth_hist_figures = []
+    for reference in top_n_refs:
+        hist_fig = plot_depth_histogram(df, reference)
+        depth_hist_figures.append((reference, hist_fig))
+        _save_plot(hist_fig, f"{outpath}/{sample_name}_depth_hist_{reference}", plot_type)
+
+    global_depth_hist_fig = plot_depth_histogram_global(df, top_n_refs)
+    _save_plot(global_depth_hist_fig, f"{outpath}/{sample_name}_depth_hist_global", plot_type)
+
+    # Lorenz curves
+    print_green("[INFO]: Generating coverage uniformity (Lorenz) curves")
+    lorenz_fig = plot_lorenz_curves(df, top_n_refs)
+    _save_plot(lorenz_fig, f"{outpath}/{sample_name}_lorenz", plot_type)
+
+    # Insert size distribution
+    print_green("[INFO]: Extracting insert sizes")
+    insert_sizes = extract_insert_sizes(bam)
+    insert_size_fig = None
+    insert_size_stats = None
+    if insert_sizes is not None:
+        print_green(f"[INFO]: {len(insert_sizes):,} paired-end inserts found")
+        insert_size_fig = plot_insert_size_distribution(insert_sizes, sample_name)
+        _save_plot(insert_size_fig, f"{outpath}/{sample_name}_insert_size", plot_type)
+        insert_size_stats = {
+            "count": len(insert_sizes),
+            "mean": float(np.mean(insert_sizes)),
+            "median": float(np.median(insert_sizes)),
+            "std": float(np.std(insert_sizes)),
+            "min": int(np.min(insert_sizes)),
+            "max": int(np.max(insert_sizes)),
+        }
+    else:
+        print_green("[INFO]: No paired-end data found — skipping insert size plot")
 
     generate_html_report(
         sample_name=sample_name,
@@ -1179,6 +1487,11 @@ def main_from_bam(
         coverage_figures=coverage_figures,
         cum_fig=cum_fig,
         outpath=outpath,
+        depth_hist_figures=depth_hist_figures,
+        global_depth_hist_fig=global_depth_hist_fig,
+        lorenz_fig=lorenz_fig,
+        insert_size_fig=insert_size_fig,
+        insert_size_stats=insert_size_stats,
     )
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")

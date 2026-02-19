@@ -23,6 +23,7 @@ def sample_fig():
 def html_report(tmp_path, mosdepth_df, sample_fig):
     """Generate an HTML report and return its path."""
     coverage_figures = [("refA", sample_fig), ("refB", sample_fig)]
+    depth_hist_figures = [("refA", sample_fig), ("refB", sample_fig)]
     generate_html_report(
         sample_name="test_sample",
         bam="/path/to/test.bam",
@@ -33,6 +34,18 @@ def html_report(tmp_path, mosdepth_df, sample_fig):
         coverage_figures=coverage_figures,
         cum_fig=sample_fig,
         outpath=str(tmp_path),
+        depth_hist_figures=depth_hist_figures,
+        global_depth_hist_fig=sample_fig,
+        lorenz_fig=sample_fig,
+        insert_size_fig=sample_fig,
+        insert_size_stats={
+            "count": 1000,
+            "mean": 300.0,
+            "median": 290.0,
+            "std": 50.0,
+            "min": 100,
+            "max": 600,
+        },
     )
     return tmp_path / "test_sample_report.html"
 
@@ -53,17 +66,26 @@ def test_html_report_is_standalone(html_report):
 def test_html_report_contains_base64_images(html_report):
     content = html_report.read_text()
     matches = re.findall(r"data:image/png;base64,", content)
-    # 2 coverage plots + 1 cumulative = 3
-    assert len(matches) == 3
+    # 2 coverage + 1 cumulative + 2 per-ref depth hist + 1 global depth hist + 1 lorenz + 1 insert size = 8
+    assert len(matches) == 8
 
 
 def test_html_report_contains_stats(html_report):
     content = html_report.read_text()
     assert "Mean coverage" in content
+    assert "Median coverage" in content
     assert "&gt; 0X" in content or "> 0X" in content
     assert "refA" in content
     assert "refB" in content
     assert "test_sample" in content
+
+
+def test_html_report_contains_new_sections(html_report):
+    content = html_report.read_text()
+    assert "Depth Distribution" in content
+    assert "Coverage Uniformity" in content
+    assert "Insert Size Distribution" in content
+    assert "Gini" in content
 
 
 def test_html_report_no_cum_fig(tmp_path, mosdepth_df, sample_fig):

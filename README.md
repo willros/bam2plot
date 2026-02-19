@@ -1,8 +1,20 @@
 # bam2plot
 
-Generate coverage plots from BAM files. No external tools required.
+Generate coverage plots and QC reports from BAM files. No external tools required.
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15052225.svg)](https://zenodo.org/records/15052225)
+
+## Features
+
+- **Coverage plots** with three-color depth visualization (red = 0X, yellow = below threshold, blue = above threshold)
+- **Cumulative coverage** plots per reference
+- **Depth distribution histograms** (per-reference and global) with mean/median annotations
+- **Coverage uniformity analysis** via Lorenz curves with Gini coefficient
+- **Insert size distribution** for paired-end data with summary statistics
+- **Standalone HTML report** combining all plots, statistics tables, and interactive sections into a single file
+- **Median coverage** and **Gini coefficient** reported alongside mean coverage for each reference
+- Direct read alignment via minimap2 (no BAM needed)
+- GC content visualization for reference sequences
 
 ## Installation
 
@@ -28,17 +40,43 @@ bam2plot from_reads -r1 reads.fastq -ref reference.fasta -o output_folder
 bam2plot guci -ref reference.fasta -w 1000 -o output_folder
 ```
 
-## Output examples
+## Output
 
-Coverage plot with three-color depth visualization (red = 0X, yellow = below threshold, blue = above threshold):
+Running `from_bam` produces all of the following automatically:
+
+### Coverage plot
+
+Three-color depth visualization (red = 0X, yellow = below threshold, blue = above threshold):
 
 ![coverage plot](example/normal.png)
 
-Cumulative coverage plots per reference (with `-c`):
+### Cumulative coverage
+
+Per-reference cumulative coverage plots (with `-c`):
 
 ![cumulative plot](example/cumplot.png)
 
-Terminal output while running:
+### Depth distribution histograms
+
+Weighted histograms showing the distribution of coverage depth across bases, with vertical lines for mean and median coverage. Generated per-reference and as a global aggregate.
+
+### Coverage uniformity (Lorenz curves)
+
+Lorenz curves visualize how evenly coverage is distributed across the genome. A perfectly uniform coverage would follow the diagonal; deviation below indicates uneven coverage. Each subplot is annotated with the Gini coefficient (0 = perfectly uniform, 1 = maximally unequal).
+
+### Insert size distribution
+
+For paired-end BAM files, a histogram of insert sizes is generated with mean, median, and standard deviation annotations. A summary statistics table is included in the HTML report.
+
+### HTML report
+
+A self-contained HTML report (`<sample>_report.html`) is always generated, embedding all plots as base64 images. It includes:
+
+- **Global summary** — mean coverage, median coverage, percent bases above 0X and threshold
+- **Per-reference statistics table** — total bases, mean/median coverage, percent above thresholds, Gini coefficient
+- **All plots** — coverage, cumulative, depth histograms, Lorenz curves, and insert size distribution
+
+### Terminal output
 
 ![terminal](example/running.png)
 
@@ -115,11 +153,27 @@ For unindexed BAMs, a single-pass sequential sweep is used instead, iterating al
 
 The per-position depth array is compressed into run-length encoded (RLE) intervals: consecutive positions with identical depth are merged into `(ref, start, end, depth)` rows. This typically reduces millions of positions to hundreds of thousands of intervals, making downstream operations efficient.
 
-The RLE DataFrame is then enriched with per-reference statistics: mean coverage, percentage of bases above zero, percentage above the user-specified threshold, and genome-wide totals.
+The RLE DataFrame is then enriched with per-reference statistics: mean coverage, median coverage, percentage of bases above zero, percentage above the user-specified threshold, Gini coefficient for coverage uniformity, and genome-wide totals. Median and Gini are computed directly from the RLE representation using weighted algorithms — no per-base expansion needed.
 
-**4. Visualization**
+**4. Coverage uniformity analysis**
 
-For each reference, the RLE intervals are exploded back to per-position depth, smoothed with a rolling mean, and rendered as a colored line plot using matplotlib's `LineCollection`. Three colors indicate depth status: red (0X), yellow (below threshold), blue (above threshold). Optionally, seaborn `FacetGrid` cumulative coverage plots are generated across references.
+For each reference, a Lorenz curve is computed from the RLE data: intervals are sorted by depth, and cumulative fractions of bases vs. cumulative fractions of total coverage are calculated. The Gini coefficient is derived from the area between the Lorenz curve and the diagonal (via trapezoidal integration). This quantifies how evenly reads are distributed across the genome — useful for detecting amplification bias or capture efficiency problems.
+
+**5. Insert size extraction**
+
+For paired-end BAM files, insert sizes (template lengths) are extracted by iterating all reads. Only read1 of each pair with a positive template length is counted to avoid double-counting. The distribution is summarized with mean, median, standard deviation, and visualized as a histogram.
+
+**6. Visualization**
+
+For each reference, the RLE intervals are exploded back to per-position depth, smoothed with a rolling mean, and rendered as a colored line plot using matplotlib's `LineCollection`. Three colors indicate depth status: red (0X), yellow (below threshold), blue (above threshold).
+
+Additional plots generated automatically:
+- **Cumulative coverage** — seaborn `FacetGrid` showing percent of bases above each coverage level
+- **Depth histograms** — weighted histograms (per-reference and global) with mean/median vertical lines
+- **Lorenz curves** — `FacetGrid` with one subplot per reference, annotated with Gini coefficients
+- **Insert size histogram** — for paired-end data, with mean/median lines and a stats text box
+
+All plots are saved to disk and embedded in a standalone HTML report.
 
 ### Read alignment (`from_reads`)
 

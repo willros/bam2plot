@@ -7,3 +7,5 @@ upload:
 	twine upload dist/*
 format:
 	black bam2plot/*.py
+test:
+	pixi run test
