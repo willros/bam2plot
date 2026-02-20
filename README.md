@@ -48,21 +48,25 @@ Running `from_bam` produces all of the following automatically:
 
 Three-color depth visualization (red = 0X, yellow = below threshold, blue = above threshold):
 
-![coverage plot](example/normal.png)
+![coverage plot](example/coverage.png)
 
 ### Cumulative coverage
 
 Per-reference cumulative coverage plots (with `-c`):
 
-![cumulative plot](example/cumplot.png)
+![cumulative plot](example/cumulative_coverage.png)
 
 ### Depth distribution histograms
 
 Weighted histograms showing the distribution of coverage depth across bases, with vertical lines for mean and median coverage. Generated per-reference and as a global aggregate.
 
+![depth histogram](example/depth_hist.png)
+
 ### Coverage uniformity (Lorenz curves)
 
 Lorenz curves visualize how evenly coverage is distributed across the genome. A perfectly uniform coverage would follow the diagonal; deviation below indicates uneven coverage. Each subplot is annotated with the Gini coefficient (0 = perfectly uniform, 1 = maximally unequal).
+
+![lorenz curves](example/lorenz.png)
 
 ### Insert size distribution
 
@@ -76,9 +80,7 @@ A self-contained HTML report (`<sample>_report.html`) is always generated, embed
 - **Per-reference statistics table** — total bases, mean/median coverage, percent above thresholds, Gini coefficient
 - **All plots** — coverage, cumulative, depth histograms, Lorenz curves, and insert size distribution
 
-### Terminal output
-
-![terminal](example/running.png)
+See [example/report.html](example/report.html) for a complete example report.
 
 ## Subcommands
 
