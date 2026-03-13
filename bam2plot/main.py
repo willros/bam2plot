@@ -150,7 +150,18 @@ def _results_to_dataframe(results):
     )
 
 
-def bam_to_raw_df(bam: str) -> pl.DataFrame:
+def _resolve_worker_count(n_refs: int, threads: int | None) -> int:
+    if n_refs <= 1:
+        return 1
+
+    available_cpus = os.cpu_count() or 1
+    if threads is None:
+        return min(n_refs, available_cpus, 4)
+
+    return min(n_refs, threads, available_cpus)
+
+
+def bam_to_raw_df(bam: str, threads: int | None = None) -> pl.DataFrame:
     """Compute per-base coverage from a BAM file.
 
     For indexed BAMs, parallelizes across references using multiprocessing.
@@ -168,9 +179,9 @@ def bam_to_raw_df(bam: str) -> pl.DataFrame:
 
     n_refs = len(ref_names)
     args = [(bam, ref_names[i], ref_lens[i]) for i in range(n_refs)]
+    n_workers = _resolve_worker_count(n_refs, threads)
 
-    if has_index and n_refs > 1:
-        n_workers = min(n_refs, os.cpu_count() or 1, 4)
+    if has_index and n_refs > 1 and n_workers > 1:
         try:
             with multiprocessing.Pool(n_workers) as pool:
                 results = pool.map(_sweep_one_ref, args)
@@ -1187,6 +1198,16 @@ def check_range(value):
     return ivalue
 
 
+def check_threads(value):
+    ivalue = int(value)
+    if ivalue < 1:
+        print_fail(
+            f"   [ERROR]: {value} is an invalid thread count. Choose a number greater than 0."
+        )
+        sys.exit(1)
+    return ivalue
+
+
 def parse_whitelist(whitelist):
     if whitelist is None:
         return None
@@ -1286,6 +1307,13 @@ def bam2plot_from_bam():
         type=check_range,  # cap
         help="How many references (chromosomes) to plot",
     )
+    parser.add_argument(
+        "--threads",
+        required=False,
+        default=None,
+        type=check_threads,
+        help="Maximum worker processes for indexed BAM coverage computation (default: auto, capped at 4).",
+    )
 
     args = parser.parse_args()
     command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
@@ -1303,6 +1331,7 @@ def bam2plot_from_bam():
         cum_plot=args.cum_plot,
         plot_type=args.plot_type,
         number_of_refs=args.number_of_refs,
+        threads=args.threads,
     )
 
 
@@ -1330,10 +1359,10 @@ def if_sort_and_index(sort_and_index, index, bam):
     return bam, temp_files
 
 
-def process_dataframe(bam, threshold):
+def process_dataframe(bam, threshold, threads: int | None):
     try:
         print_green("[INFO]: Processing dataframe")
-        raw_df = bam_to_raw_df(bam)
+        raw_df = bam_to_raw_df(bam, threads=threads)
         df = enrich_coverage_df(raw_df, threshold)
         return df
     except Exception as e:
@@ -1676,6 +1705,7 @@ def main_from_bam(
     cum_plot,
     plot_type,
     number_of_refs,
+    threads,
 ) -> None:
     print_green(f"[INFO]: Running bam2plot from_bam!")
 
@@ -1700,7 +1730,7 @@ def main_from_bam(
 
     effective_bam, temp_files = if_sort_and_index(sort_and_index, index, bam)
     try:
-        df = process_dataframe(effective_bam, threshold)
+        df = process_dataframe(effective_bam, threshold, threads)
     finally:
         for tmp in temp_files:
             Path(tmp).unlink(missing_ok=True)

@@ -73,6 +73,8 @@ def test_from_bam_cli_writes_summary_and_zoom_aware_report(tmp_path):
         str(bam_path),
         "-o",
         str(out_dir),
+        "--threads",
+        "1",
         "-n",
         "1",
         "-z",

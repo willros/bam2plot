@@ -1,5 +1,10 @@
 import pytest
-from bam2plot.main import refs_with_most_coverage, check_range, parse_whitelist
+from bam2plot.main import (
+    check_range,
+    check_threads,
+    parse_whitelist,
+    refs_with_most_coverage,
+)
 
 
 def test_refs_returns_list(mosdepth_df):
@@ -47,6 +52,18 @@ def test_check_range_invalid():
         check_range(-5)
 
 
+def test_check_threads_valid():
+    assert check_threads(1) == 1
+    assert check_threads(8) == 8
+
+
+def test_check_threads_invalid():
+    with pytest.raises(SystemExit):
+        check_threads(0)
+    with pytest.raises(SystemExit):
+        check_threads(-1)
+
+
 def test_whitelist_filter_empty_exits(mosdepth_df):
     """Filtering by a whitelist that matches nothing should sys.exit(1)."""
     from bam2plot.main import main_from_bam
@@ -64,6 +81,7 @@ def test_whitelist_filter_empty_exits(mosdepth_df):
             cum_plot=False,
             plot_type="png",
             number_of_refs=10,
+            threads=None,
         )
 
 

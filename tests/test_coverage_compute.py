@@ -1,10 +1,10 @@
-import numpy as np
 import bam2plot.main as main_mod
-import pysam
+import numpy as np
 import polars as pl
+import pysam
 import pytest
 
-from bam2plot.main import bam_to_raw_df, enrich_coverage_df
+from bam2plot.main import _resolve_worker_count, bam_to_raw_df, enrich_coverage_df
 
 
 @pytest.fixture
@@ -279,3 +279,59 @@ def test_indexed_bam_falls_back_when_pool_unavailable(
     df_indexed = bam_to_raw_df(synthetic_indexed_bam).sort("ref", "start")
 
     assert df_indexed.equals(df_unindexed)
+
+
+def test_resolve_worker_count_auto_caps_default_parallelism(monkeypatch):
+    monkeypatch.setattr(main_mod.os, "cpu_count", lambda: 16)
+
+    assert _resolve_worker_count(n_refs=12, threads=None) == 4
+
+
+def test_resolve_worker_count_respects_requested_threads(monkeypatch):
+    monkeypatch.setattr(main_mod.os, "cpu_count", lambda: 16)
+
+    assert _resolve_worker_count(n_refs=12, threads=6) == 6
+
+
+def test_resolve_worker_count_caps_to_cpu_and_reference_count(monkeypatch):
+    monkeypatch.setattr(main_mod.os, "cpu_count", lambda: 4)
+
+    assert _resolve_worker_count(n_refs=3, threads=8) == 3
+
+
+def test_indexed_bam_uses_requested_thread_limit(synthetic_indexed_bam, monkeypatch):
+    calls = {}
+
+    class RecordingPool:
+        def __init__(self, n_workers):
+            calls["n_workers"] = n_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, func, args):
+            return [func(arg) for arg in args]
+
+    monkeypatch.setattr(main_mod.multiprocessing, "Pool", RecordingPool)
+    monkeypatch.setattr(main_mod.os, "cpu_count", lambda: 16)
+
+    bam_to_raw_df(synthetic_indexed_bam, threads=8)
+
+    assert calls["n_workers"] == 2
+
+
+def test_indexed_bam_with_single_thread_skips_worker_pool(
+    synthetic_indexed_bam, monkeypatch
+):
+    class UnexpectedPool:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("worker pool should not be created when threads=1")
+
+    monkeypatch.setattr(main_mod.multiprocessing, "Pool", UnexpectedPool)
+
+    df = bam_to_raw_df(synthetic_indexed_bam, threads=1)
+
+    assert set(df.columns) == {"ref", "start", "end", "depth"}

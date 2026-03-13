@@ -96,6 +96,7 @@ bam2plot from_bam -b BAM -o OUTPATH [options]
   -t, --threshold        Coverage depth threshold (default: 10)
   -r, --rolling_window   Rolling window size for smoothing (default: 100)
   -n, --number_of_refs   How many references to plot (default: 10, max: 100)
+  --threads              Maximum worker processes for indexed BAMs (default: auto, capped at 4)
   -w, --whitelist        Only plot these references (comma-separated, e.g. chr1,chr2)
   -z, --zoom             Zoom into a region, e.g. -z='1000 5000'
   -c, --cum_plot         Also generate cumulative coverage plots
