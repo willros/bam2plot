@@ -45,9 +45,7 @@ def test_return_ref_for_plotting_color_high(mosdepth_df):
 def test_return_ref_for_plotting_color_low(mosdepth_df):
     result = return_ref_for_plotting(mosdepth_df, "refA", thresh=10)
     # refA: middle 100bp have depth=5, 0 < rolling <= 10 → COLOR_LOW
-    low_rows = result.filter(
-        (pl.col("rolling") > 0) & (pl.col("rolling") <= 10)
-    )
+    low_rows = result.filter((pl.col("rolling") > 0) & (pl.col("rolling") <= 10))
     colors = low_rows["color"].unique().to_list()
     assert colors == [COLOR_LOW]
 
@@ -89,6 +87,7 @@ def test_return_ref_for_plotting_mid_size_ref():
     rows = [("midref", 0, n_bases, 10)]
     raw = pl.DataFrame(rows, schema=["ref", "start", "end", "depth"], orient="row")
     from bam2plot.main import enrich_coverage_df
+
     df = enrich_coverage_df(raw, thresh=5)
     # Should not raise — rolling_window is clamped to 1
     result = return_ref_for_plotting(df, "midref", thresh=5)

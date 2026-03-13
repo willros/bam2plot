@@ -1,6 +1,5 @@
 import pytest
-import polars as pl
-from bam2plot.main import refs_with_most_coverage, check_range
+from bam2plot.main import refs_with_most_coverage, check_range, parse_whitelist
 
 
 def test_refs_returns_list(mosdepth_df):
@@ -51,6 +50,7 @@ def test_check_range_invalid():
 def test_whitelist_filter_empty_exits(mosdepth_df):
     """Filtering by a whitelist that matches nothing should sys.exit(1)."""
     from bam2plot.main import main_from_bam
+
     with pytest.raises(SystemExit):
         main_from_bam(
             bam="test/barcode87.bam",
@@ -65,3 +65,11 @@ def test_whitelist_filter_empty_exits(mosdepth_df):
             plot_type="png",
             number_of_refs=10,
         )
+
+
+def test_parse_whitelist_splits_comma_separated_values():
+    assert parse_whitelist("chr1, chr2,chr3") == ["chr1", "chr2", "chr3"]
+
+
+def test_parse_whitelist_normalizes_mixed_inputs():
+    assert parse_whitelist(["chr1, chr2", "chr3", ""]) == ["chr1", "chr2", "chr3"]

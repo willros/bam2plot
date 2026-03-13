@@ -15,10 +15,12 @@ def paired_end_bam(tmp_path):
     """BAM with 2 proper pairs (template_length 300 and 400)."""
     bam_path = str(tmp_path / "paired.bam")
 
-    header = pysam.AlignmentHeader.from_dict({
-        "HD": {"VN": "1.0", "SO": "coordinate"},
-        "SQ": [{"SN": "ref1", "LN": 1000}],
-    })
+    header = pysam.AlignmentHeader.from_dict(
+        {
+            "HD": {"VN": "1.0", "SO": "coordinate"},
+            "SQ": [{"SN": "ref1", "LN": 1000}],
+        }
+    )
 
     with pysam.AlignmentFile(bam_path, "wb", header=header) as outf:
         # Pair 1 — read1
@@ -89,10 +91,12 @@ def single_end_bam(tmp_path):
     """BAM with only single-end reads (no paired-end data)."""
     bam_path = str(tmp_path / "single.bam")
 
-    header = pysam.AlignmentHeader.from_dict({
-        "HD": {"VN": "1.0", "SO": "coordinate"},
-        "SQ": [{"SN": "ref1", "LN": 500}],
-    })
+    header = pysam.AlignmentHeader.from_dict(
+        {
+            "HD": {"VN": "1.0", "SO": "coordinate"},
+            "SQ": [{"SN": "ref1", "LN": 500}],
+        }
+    )
 
     with pysam.AlignmentFile(bam_path, "wb", header=header) as outf:
         a = pysam.AlignedSegment(outf.header)

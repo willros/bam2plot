@@ -78,6 +78,9 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+.pixi/
+.pixi-cache/
+.pixi-home/
 
 # IPython
 profile_default/

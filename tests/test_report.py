@@ -60,7 +60,7 @@ def test_html_report_is_standalone(html_report):
     # No external stylesheet links
     assert "<link " not in content.lower()
     # No external script tags
-    assert not re.search(r'<script\s+src=', content, re.IGNORECASE)
+    assert not re.search(r"<script\s+src=", content, re.IGNORECASE)
 
 
 def test_html_report_contains_base64_images(html_report):
@@ -115,4 +115,4 @@ def test_fig_to_base64_returns_valid_string(sample_fig):
     assert isinstance(result, str)
     assert len(result) > 100
     # Should be valid base64 (no whitespace, only base64 chars)
-    assert re.match(r'^[A-Za-z0-9+/=]+$', result)
+    assert re.match(r"^[A-Za-z0-9+/=]+$", result)

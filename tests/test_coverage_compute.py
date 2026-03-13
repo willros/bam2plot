@@ -1,4 +1,5 @@
 import numpy as np
+import bam2plot.main as main_mod
 import pysam
 import polars as pl
 import pytest
@@ -15,13 +16,15 @@ def synthetic_bam(tmp_path):
     """
     bam_path = str(tmp_path / "test.bam")
 
-    header = pysam.AlignmentHeader.from_dict({
-        "HD": {"VN": "1.0", "SO": "coordinate"},
-        "SQ": [
-            {"SN": "refA", "LN": 200},
-            {"SN": "refB", "LN": 100},
-        ],
-    })
+    header = pysam.AlignmentHeader.from_dict(
+        {
+            "HD": {"VN": "1.0", "SO": "coordinate"},
+            "SQ": [
+                {"SN": "refA", "LN": 200},
+                {"SN": "refB", "LN": 100},
+            ],
+        }
+    )
 
     with pysam.AlignmentFile(bam_path, "wb", header=header) as outf:
         # refA read 1: [10, 60)
@@ -65,6 +68,7 @@ def synthetic_bam(tmp_path):
 
 # ---- bam_to_raw_df tests ----
 
+
 def test_bam_to_raw_df_schema(synthetic_bam):
     df = bam_to_raw_df(synthetic_bam)
     assert set(df.columns) == {"ref", "start", "end", "depth"}
@@ -89,7 +93,9 @@ def test_bam_to_raw_df_intervals_cover_full_ref(synthetic_bam):
         starts = ref_df["start"].to_list()
         ends = ref_df["end"].to_list()
         for i in range(1, len(starts)):
-            assert starts[i] == ends[i - 1], f"Gap in {ref_name} at position {ends[i-1]}"
+            assert (
+                starts[i] == ends[i - 1]
+            ), f"Gap in {ref_name} at position {ends[i-1]}"
 
 
 def test_bam_to_raw_df_depth_values(synthetic_bam):
@@ -135,24 +141,38 @@ def test_bam_to_raw_df_zero_depth_gaps(synthetic_bam):
 
 # ---- enrich_coverage_df tests ----
 
+
 @pytest.fixture
 def raw_df():
     """Simple raw DataFrame for testing enrich_coverage_df."""
-    return pl.DataFrame({
-        "ref": ["refA", "refA", "refA", "refB", "refB"],
-        "start": [0, 100, 200, 0, 40],
-        "end": [100, 200, 300, 40, 80],
-        "depth": [0, 5, 20, 15, 0],
-    })
+    return pl.DataFrame(
+        {
+            "ref": ["refA", "refA", "refA", "refB", "refB"],
+            "start": [0, 100, 200, 0, 40],
+            "end": [100, 200, 300, 40, 80],
+            "depth": [0, 5, 20, 15, 0],
+        }
+    )
 
 
 def test_enrich_coverage_df_schema(raw_df):
     df = enrich_coverage_df(raw_df, thresh=10)
     expected_cols = {
-        "ref", "start", "end", "depth", "n_bases", "total_bases",
-        "mean_coverage", "mean_coverage_total", "pct_over_zero",
-        "pct_over_thresh", "pct_total_over_zero", "pct_total_over_thresh",
-        "median_coverage", "median_coverage_total", "gini_coefficient",
+        "ref",
+        "start",
+        "end",
+        "depth",
+        "n_bases",
+        "total_bases",
+        "mean_coverage",
+        "mean_coverage_total",
+        "pct_over_zero",
+        "pct_over_thresh",
+        "pct_total_over_zero",
+        "pct_total_over_thresh",
+        "median_coverage",
+        "median_coverage_total",
+        "gini_coefficient",
     }
     assert set(df.columns) == expected_cols
 
@@ -181,6 +201,7 @@ def test_enrich_pct_ranges(raw_df):
 
 
 # ---- indexed BAM tests (same sweep-line, but with an indexed BAM) ----
+
 
 @pytest.fixture
 def synthetic_indexed_bam(synthetic_bam):
@@ -229,7 +250,9 @@ def test_bam_to_raw_df_indexed_intervals_cover_full_ref(synthetic_indexed_bam):
         starts = ref_df["start"].to_list()
         ends = ref_df["end"].to_list()
         for i in range(1, len(starts)):
-            assert starts[i] == ends[i - 1], f"Gap in {ref_name} at position {ends[i-1]}"
+            assert (
+                starts[i] == ends[i - 1]
+            ), f"Gap in {ref_name} at position {ends[i-1]}"
 
 
 def test_indexed_and_unindexed_match(synthetic_bam, synthetic_indexed_bam):
@@ -239,3 +262,20 @@ def test_indexed_and_unindexed_match(synthetic_bam, synthetic_indexed_bam):
 
     assert df_unindexed.shape == df_indexed.shape
     assert df_unindexed.equals(df_indexed)
+
+
+def test_indexed_bam_falls_back_when_pool_unavailable(
+    synthetic_bam, synthetic_indexed_bam, monkeypatch
+):
+    """Indexed BAMs should still work if worker pool setup is blocked."""
+
+    class FailingPool:
+        def __init__(self, *_args, **_kwargs):
+            raise PermissionError("worker pools are unavailable")
+
+    monkeypatch.setattr(main_mod.multiprocessing, "Pool", FailingPool)
+
+    df_unindexed = bam_to_raw_df(synthetic_bam).sort("ref", "start")
+    df_indexed = bam_to_raw_df(synthetic_indexed_bam).sort("ref", "start")
+
+    assert df_indexed.equals(df_unindexed)

@@ -9,8 +9,8 @@ from bam2plot.main import (
     compute_lorenz_data_rle,
 )
 
-
 # ---- weighted_median_rle tests ----
+
 
 def test_weighted_median_uniform():
     """Uniform depth across all bases → median equals the depth."""
@@ -40,6 +40,7 @@ def test_weighted_median_empty():
 
 
 # ---- compute_gini_rle tests ----
+
 
 def test_gini_uniform():
     """All bases at the same depth → Gini should be 0."""
@@ -71,6 +72,7 @@ def test_gini_empty():
 
 # ---- compute_lorenz_data_rle tests ----
 
+
 def test_lorenz_shape():
     depths = np.array([5, 10, 15])
     weights = np.array([100, 100, 100])
@@ -99,6 +101,7 @@ def test_lorenz_monotonic():
 
 
 # ---- coverage_for_value tests ----
+
 
 def test_coverage_for_value_returns_dataframe(single_ref_df):
     result = coverage_for_value(single_ref_df, coverage=5)

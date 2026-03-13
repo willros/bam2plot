@@ -15,6 +15,7 @@ pyfastx = "*"
 pyarrow = "*"
 matplotlib-base = "*"
 pytest = ">=7.0"
+black = ">=26.3.1,<27"
 python-build = ">=1.4.0,<2"
 twine = ">=6.2.0,<7"
 
@@ -22,4 +23,6 @@ twine = ">=6.2.0,<7"
 bam2plot = { path = ".", editable = true }
 
 [tasks]
+format = "black setup.py bam2plot/__init__.py bam2plot/main.py tests/*.py"
+format-check = "black --check setup.py bam2plot/__init__.py bam2plot/main.py tests/*.py"
 test = "pytest tests/ -v"

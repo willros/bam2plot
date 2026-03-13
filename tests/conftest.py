@@ -27,9 +27,7 @@ def mosdepth_df():
     ]
     rows = rows_a + rows_b
 
-    raw = pl.DataFrame(
-        rows, schema=["ref", "start", "end", "depth"], orient="row"
-    )
+    raw = pl.DataFrame(rows, schema=["ref", "start", "end", "depth"], orient="row")
 
     return enrich_coverage_df(raw, thresh=10)
 
@@ -61,9 +59,7 @@ def plotting_ready_df():
     rolling = [0.0] * 10 + [5.0] * 20 + [15.0] * 20
     from bam2plot.main import COLOR_ZERO, COLOR_LOW, COLOR_HIGH
 
-    color = (
-        [COLOR_ZERO] * 10 + [COLOR_LOW] * 20 + [COLOR_HIGH] * 20
-    )
+    color = [COLOR_ZERO] * 10 + [COLOR_LOW] * 20 + [COLOR_HIGH] * 20
     return pl.DataFrame(
         {
             "pos": pos,
