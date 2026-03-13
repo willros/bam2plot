@@ -744,8 +744,7 @@ def main_guci(
     title = f"GC content of: {Path(ref).stem}. Rolling window: {window}"
     plot = plot_gc(df, title)
 
-    out_name = f"{out_folder}/gc_{Path(ref).stem}.{plot_type}"
-    plot.savefig(out_name)
+    _save_plot(plot, f"{out_folder}/gc_{Path(ref).stem}", plot_type)
 
     print_green(f"[INFO]: Guci plot done!")
     print_green(f"[INFO]: Plot location: {Path(out_folder).resolve()}")
@@ -811,108 +810,124 @@ def bam2plot_from_reads():
     )
 
 
-def map_fastq_to_ref_long_read(fastq, ref, preset="map-ont") -> pl.DataFrame:
+def _add_alignment_to_depth(df: pl.DataFrame, start: int, end: int) -> pl.DataFrame:
+    """Increment 1-based positions for a 0-based half-open alignment interval."""
+    if end <= start:
+        return df
+    return df.with_columns(
+        depth=pl.when(pl.col("pos").is_between(start + 1, end))
+        .then(pl.col("depth") + 1)
+        .otherwise(pl.col("depth"))
+    )
+
+
+def _load_single_reference_sequence(fastx_file: str) -> tuple[str, str]:
+    """Return the single sequence in a reference FASTA/FASTQ input."""
+    record = None
+    for entry in pyfastx.Fastx(fastx_file):
+        name, sequence = entry[0], entry[1]
+        if record is not None:
+            print_fail(
+                f"[ERROR]: {fastx_file} contains multiple reference sequences. bam2plot currently supports a single reference for read-based workflows."
+            )
+            sys.exit(1)
+        record = (name, sequence)
+
+    if record is None:
+        print_fail(f"[ERROR]: The reference file {fastx_file} is empty")
+        sys.exit(1)
+
+    return record
+
+
+def map_fastq_to_ref_long_read(fastq, ref, ref_len, preset="map-ont") -> pl.DataFrame:
     a = mp.Aligner(ref, preset=preset)
 
-    # see if the ref genome is the adequate one
-    test = 0
-    ref_len = None
-    for _, seq, _ in mp.fastx_read(fastq):
-        for hit in a.map(seq):
-            ref_len = hit.ctg_len
-
-        if ref_len is not None:
-            break
-
-        test += 1
-        if test > 1000:
-            print_fail("[ERROR]: No alignment to this reference")
-            return None
-
     df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
+    reads_checked = 0
+    found_alignment = False
 
     for _, seq, _ in mp.fastx_read(fastq):
+        reads_checked += 1
         for hit in a.map(seq):
-            df = df.with_columns(
-                depth=pl.when(pl.col("pos").is_between(hit.r_st, hit.r_en))
-                .then(pl.col("depth") + 1)
-                .otherwise(pl.col("depth"))
-            )
+            found_alignment = True
+            df = _add_alignment_to_depth(df, hit.r_st, hit.r_en)
+
+        if not found_alignment and reads_checked > 1000:
+            print_fail("[ERROR]: No alignment to this reference")
+            sys.exit(1)
+
+    if not found_alignment:
+        print_fail("[ERROR]: No alignment to this reference")
+        sys.exit(1)
+
     return df
 
 
 def PE_reads_to_df(read_1, read_2) -> pl.DataFrame:
-    def parse_PE_read(fastx, read_name, comment_name, seq_name):
-
+    def parse_PE_read(fastx, seq_name):
         reads = pyfastx.Fastx(fastx, comment=True)
-        names = []
+        pair_ids = []
         seqs = []
-        comments = []
 
-        for name, seq, qual, comment in reads:
-            names.append(name)
+        for name, seq, _qual, _comment in reads:
+            pair_ids.append(_normalize_paired_read_name(name))
             seqs.append(seq)
-            comments.append(comment)
 
-        return pl.DataFrame({read_name: names, comment_name: comments, seq_name: seqs})
+        return pl.DataFrame({"pair_id": pair_ids, seq_name: seqs})
 
-    read_1 = parse_PE_read(
-        read_1, read_name="name_1", comment_name="comment_1", seq_name="seq_1"
-    )
-    read_2 = parse_PE_read(
-        read_2, read_name="name_2", comment_name="comment_2", seq_name="seq_2"
-    )
+    read_1 = parse_PE_read(read_1, seq_name="seq_1")
+    read_2 = parse_PE_read(read_2, seq_name="seq_2")
 
     try:
-        return (
-            pl.concat([read_1, read_2], how="horizontal")
-            .sort(pl.col("comment_1"), pl.col("comment_2"))
-            .with_columns(
-                comment_1=pl.col("comment_1").str.replace("/.*", ""),
-                comment_2=pl.col("comment_2").str.replace("/.*", ""),
-            )
-            .filter(pl.col("comment_1") == pl.col("comment_2"))
-            .select(pl.col("seq_1"), pl.col("seq_2"))
+        if read_1["pair_id"].n_unique() != read_1.height:
+            raise ValueError("duplicate read ids detected in read_1")
+        if read_2["pair_id"].n_unique() != read_2.height:
+            raise ValueError("duplicate read ids detected in read_2")
+
+        paired = (
+            read_1.join(read_2, on="pair_id", how="inner")
+            .sort("pair_id")
+            .select("seq_1", "seq_2")
         )
+
+        if paired.height != read_1.height or paired.height != read_2.height:
+            raise ValueError("paired FASTQ files contain unmatched read ids")
+
+        return paired
 
     except Exception as e:
         print_fail(f"[ERROR]: fastq files do not match up! ({e})")
         sys.exit(1)
 
 
-def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, preset="sr") -> pl.DataFrame:
+def _normalize_paired_read_name(name: str) -> str:
+    if name.endswith("/1") or name.endswith("/2"):
+        return name[:-2]
+    return name
+
+
+def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, ref_len, preset="sr") -> pl.DataFrame:
     a = mp.Aligner(ref, preset=preset)
-
-    # see if the ref genome is the adequate one
-    test = 0
-    ref_len = None
     PE_df = PE_reads_to_df(fastq_1, fastq_2)
-    for reads in PE_df.iter_rows(named=True):
-        for hit in a.map(reads["seq_1"], reads["seq_2"]):
-            ref_len = hit.ctg_len
-
-        if ref_len is not None:
-            break
-
-        test += 1
-        if test > 1000:
-            print_fail(f"No alignment to this reference: {ref}")
-            sys.exit(1)
 
     df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
-
-    counter = 0
-    print_green(f"Processing read: 1 of {PE_df.shape[0]}")
-    for reads in PE_df.iter_rows(named=True):
-        counter += 1
-        if counter % 50_000 == 0:
-            print_green(f"Processing read: {counter} of {PE_df.shape[0]}")
+    found_alignment = False
+    for idx, reads in enumerate(PE_df.iter_rows(named=True), start=1):
+        if idx == 1 or idx % 50_000 == 0:
+            print_green(f"Processing read: {idx} of {PE_df.shape[0]}")
         for hit in a.map(reads["seq_1"], reads["seq_2"]):
-            df = df.with_columns(
-                depth=pl.when(pl.col("pos").is_between(hit.r_st, hit.r_en))
-                .then(pl.col("depth") + 1)
-                .otherwise(pl.col("depth"))
-            )
+            found_alignment = True
+            df = _add_alignment_to_depth(df, hit.r_st, hit.r_en)
+
+        if not found_alignment and idx > 1000:
+            print_fail(f"[ERROR]: No alignment to this reference: {ref}")
+            sys.exit(1)
+
+    if not found_alignment:
+        print_fail(f"[ERROR]: No alignment to this reference: {ref}")
+        sys.exit(1)
+
     return df
 
 
@@ -934,14 +949,13 @@ def plot_from_reads(
 
 
 def ref_to_seq_df(fastx_file: str) -> pl.DataFrame:
-    fastx = pyfastx.Fastx(fastx_file)
-    reads = list(zip(*[[x[0], x[1]] for x in fastx]))
+    name, sequence = _load_single_reference_sequence(fastx_file)
 
     df = (
         pl.DataFrame(
             {
-                "name": reads[0],
-                "sequence": reads[1],
+                "name": [name],
+                "sequence": [sequence],
             }
         )
         .select(pl.col("sequence").str.split("").explode(), pl.col("name"))
@@ -954,7 +968,9 @@ def ref_to_seq_df(fastx_file: str) -> pl.DataFrame:
 
 def add_gc(df) -> pl.DataFrame:
     return df.with_columns(
-        gc=pl.when(pl.col("sequence").str.contains("G|C")).then(1).otherwise(0)
+        gc=pl.when(pl.col("sequence").str.to_uppercase().is_in(["G", "C"]))
+        .then(1)
+        .otherwise(0)
     )
 
 
@@ -1005,14 +1021,15 @@ def main_from_reads(
     files_not_exists(read_1, read_2, ref)
     make_dir(out_folder)
     sample_name = Path(read_1).stem
-    ref_name = Path(ref).stem
+    ref_name, reference_sequence = _load_single_reference_sequence(ref)
+    ref_len = len(reference_sequence)
 
     if read_2 is None:
         print_green(f"[INFO]: Running bam2plot on reads from: {read_1}!")
-        df = map_fastq_to_ref_long_read(read_1, ref)
+        df = map_fastq_to_ref_long_read(read_1, ref, ref_len)
     else:
         print_green(f"[INFO]: Running bam2plot on reads from: {read_1} and {read_2}!")
-        df = map_fastq_to_ref_PE_read(read_1, read_2, ref)
+        df = map_fastq_to_ref_PE_read(read_1, read_2, ref, ref_len)
 
     if gc:
         df = df.with_columns(
@@ -1069,6 +1086,10 @@ def parse_whitelist(whitelist):
         )
 
     return parsed_whitelist or None
+
+
+def _refresh_coverage_stats(df: pl.DataFrame, threshold: int) -> pl.DataFrame:
+    return enrich_coverage_df(df.select("ref", "start", "end", "depth"), threshold)
 
 
 def bam2plot_from_bam():
@@ -1153,7 +1174,6 @@ def bam2plot_from_bam():
     )
 
     args = parser.parse_args()
-    args.whitelist = parse_whitelist(args.whitelist)
     command = "\nbam2plot \n" + "".join(f"{k}: {v}\n" for k, v in vars(args).items())
     print_green(command)
 
@@ -1221,32 +1241,14 @@ def _save_plot(fig, path: str, plot_type: str):
 def save_plot_coverage(plot, outpath, sample_name, reference, plot_type):
     out_file = f"{outpath}/{sample_name}_bam2plot"
     name = f"{out_file}_{reference}"
-
-    if plot_type == "png":
-        plot.savefig(f"{name}.png")
-
-    if plot_type == "svg":
-        plot.savefig(f"{name}.svg")
-
-    if plot_type == "both":
-        plot.savefig(f"{name}.svg")
-        plot.savefig(f"{name}.png")
+    _save_plot(plot, name, plot_type)
 
     print_green(f"[INFO]: Plot for {reference} generated")
 
 
 def save_plot_cum(cum_plot, outpath, bam, plot_type):
     cum_plot_name = f"{outpath}/{Path(bam).stem}_cumulative_coverage"
-
-    if plot_type == "png":
-        cum_plot.savefig(f"{cum_plot_name}.png")
-
-    if plot_type == "svg":
-        cum_plot.savefig(f"{cum_plot_name}.svg")
-
-    if plot_type == "both":
-        cum_plot.savefig(f"{cum_plot_name}.png")
-        cum_plot.savefig(f"{cum_plot_name}.svg")
+    _save_plot(cum_plot, cum_plot_name, plot_type)
 
     print_green(f"[INFO]: Cumulative plot generated!")
 
@@ -1458,7 +1460,7 @@ def main_from_bam(
 
     if zoom:
         try:
-            parts = zoom.split(" ")
+            parts = zoom.split()
             start = int(parts[0])
             end = int(parts[1])
         except (IndexError, ValueError):
@@ -1482,8 +1484,6 @@ def main_from_bam(
         for tmp in temp_files:
             Path(tmp).unlink(missing_ok=True)
 
-    print_total_reference_info(df, threshold)
-
     whitelist = parse_whitelist(whitelist)
 
     if whitelist:
@@ -1494,6 +1494,9 @@ def main_from_bam(
         if df.is_empty():
             print_fail("[ERROR]: No references matched the whitelist")
             sys.exit(1)
+        df = _refresh_coverage_stats(df, threshold)
+
+    print_total_reference_info(df, threshold)
 
     if number_of_refs == 0:
         print_fail("[ERROR]: No reference to plot against!")
@@ -1505,7 +1508,7 @@ def main_from_bam(
     top_n_refs = refs_with_most_coverage(df, n=number_of_refs)
     coverage_figures = []
 
-    for i, reference in enumerate(top_n_refs):
+    for reference in top_n_refs:
         df_to_plot = return_ref_for_plotting(df, reference, threshold, rolling_window)
 
         if zoom:

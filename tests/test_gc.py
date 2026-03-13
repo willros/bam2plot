@@ -20,6 +20,14 @@ def test_add_gc_preserves_columns(gc_sequence_df):
     assert original_cols.issubset(set(result.columns))
 
 
+def test_add_gc_handles_lowercase_bases(gc_sequence_df):
+    lowercase_df = gc_sequence_df.with_columns(
+        sequence=pl.col("sequence").str.to_lowercase()
+    )
+    result = add_gc(lowercase_df)
+    assert result["gc"].to_list() == [0, 0, 1, 1, 1, 1, 0, 0, 0, 0]
+
+
 def test_add_rolling_mean_adds_column(gc_sequence_df):
     df = add_gc(gc_sequence_df)
     result = add_rolling_mean(df, window=3)
