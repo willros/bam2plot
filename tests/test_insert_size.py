@@ -113,6 +113,42 @@ def single_end_bam(tmp_path):
     return bam_path
 
 
+@pytest.fixture
+def mixed_quality_pairs_bam(tmp_path):
+    """BAM with one proper pair plus improper/supplementary reads that should be ignored."""
+    bam_path = str(tmp_path / "mixed_pairs.bam")
+
+    header = pysam.AlignmentHeader.from_dict(
+        {
+            "HD": {"VN": "1.0", "SO": "coordinate"},
+            "SQ": [{"SN": "ref1", "LN": 1000}],
+        }
+    )
+
+    with pysam.AlignmentFile(bam_path, "wb", header=header) as outf:
+        def make_segment(name, flag, start, tlen):
+            segment = pysam.AlignedSegment(outf.header)
+            segment.query_name = name
+            segment.query_sequence = "A" * 50
+            segment.flag = flag
+            segment.reference_id = 0
+            segment.reference_start = start
+            segment.mapping_quality = 60
+            segment.cigar = [(0, 50)]
+            segment.query_qualities = pysam.qualitystring_to_array("I" * 50)
+            segment.template_length = tlen
+            segment.next_reference_id = 0
+            segment.next_reference_start = max(start + abs(tlen) - 50, 0)
+            outf.write(segment)
+
+        make_segment("proper", 0x1 | 0x2 | 0x40, 100, 300)
+        make_segment("proper", 0x1 | 0x2 | 0x80, 350, -300)
+        make_segment("improper", 0x1 | 0x40, 500, 450)
+        make_segment("supplementary", 0x1 | 0x2 | 0x40 | 0x800, 700, 550)
+
+    return bam_path
+
+
 def test_extract_insert_sizes_paired(paired_end_bam):
     sizes = extract_insert_sizes(paired_end_bam)
     assert sizes is not None
@@ -129,6 +165,13 @@ def test_extract_insert_sizes_no_double_counting(paired_end_bam):
 def test_extract_insert_sizes_single_end(single_end_bam):
     result = extract_insert_sizes(single_end_bam)
     assert result is None
+
+
+def test_extract_insert_sizes_ignores_improper_and_supplementary_reads(
+    mixed_quality_pairs_bam,
+):
+    sizes = extract_insert_sizes(mixed_quality_pairs_bam)
+    assert sizes.tolist() == [300]
 
 
 def test_plot_insert_size_returns_figure():

@@ -95,6 +95,26 @@ def test_return_ref_for_plotting_mid_size_ref():
     assert "color" in result.columns
 
 
+def test_return_ref_for_plotting_large_ref_does_not_use_explode(monkeypatch):
+    n_bases = 1_000_000
+    raw = pl.DataFrame(
+        [("bigref", 0, n_bases, 10)],
+        schema=["ref", "start", "end", "depth"],
+        orient="row",
+    )
+    from bam2plot.main import enrich_coverage_df
+
+    df = enrich_coverage_df(raw, thresh=5)
+
+    def fail_explode(*_args, **_kwargs):
+        raise AssertionError("explode should not be called for plotting")
+
+    monkeypatch.setattr(pl.DataFrame, "explode", fail_explode)
+
+    result = return_ref_for_plotting(df, "bigref", thresh=5)
+    assert result.height <= 1000
+
+
 def test_plot_from_reads_returns_figure(reads_coverage_df):
     fig = plot_from_reads(
         reads_coverage_df,

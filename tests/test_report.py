@@ -116,3 +116,24 @@ def test_fig_to_base64_returns_valid_string(sample_fig):
     assert len(result) > 100
     # Should be valid base64 (no whitespace, only base64 chars)
     assert re.match(r"^[A-Za-z0-9+/=]+$", result)
+
+
+def test_html_report_escapes_user_controlled_text(tmp_path, mosdepth_df, sample_fig):
+    escaped_df = mosdepth_df.filter(pl.col("ref") == "refA").with_columns(
+        ref=pl.lit("ref<script>")
+    )
+    generate_html_report(
+        sample_name="sample<&>",
+        bam='/tmp/test<&>".bam',
+        threshold=10,
+        rolling_window=100,
+        df=escaped_df,
+        top_refs=["ref<script>"],
+        coverage_figures=[("ref<script>", sample_fig)],
+        cum_fig=None,
+        outpath=str(tmp_path),
+    )
+    content = (tmp_path / "sample<&>_report.html").read_text()
+    assert "sample&lt;&amp;&gt;" in content
+    assert "&lt;script&gt;" in content
+    assert "<script>" not in content

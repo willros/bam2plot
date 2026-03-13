@@ -8,7 +8,9 @@ import tempfile
 import warnings
 import base64
 import io
+import json
 from datetime import datetime
+from html import escape as html_escape
 
 import polars as pl
 import seaborn as sns
@@ -82,6 +84,7 @@ def index_bam(bam: str, new_name: str) -> None:
 
 
 _FILTER_FLAGS = 0x4 | 0x100 | 0x200 | 0x400  # unmapped | secondary | qcfail | duplicate
+_INSERT_SIZE_FILTER_FLAGS = _FILTER_FLAGS | 0x8 | 0x800  # mate unmapped | supplementary
 
 
 def _sweep_one_ref(args):
@@ -205,10 +208,15 @@ def extract_insert_sizes(bam: str):
     af = pysam.AlignmentFile(bam, "rb")
     sizes = []
     for read in af:
-        if read.flag & _FILTER_FLAGS:
+        if read.flag & _INSERT_SIZE_FILTER_FLAGS:
             continue
-        # Only read1 of a pair with positive template length
-        if (read.flag & 0x1) and (read.flag & 0x40) and read.template_length > 0:
+        # Restrict to proper paired-end primary alignments.
+        if (
+            (read.flag & 0x1)
+            and (read.flag & 0x2)
+            and (read.flag & 0x40)
+            and read.template_length > 0
+        ):
             sizes.append(read.template_length)
     af.close()
     if not sizes:
@@ -384,6 +392,28 @@ def refs_with_most_coverage(df, n=None) -> list:
     )
 
 
+def _coverage_prefix_for_points(
+    points: np.ndarray,
+    starts: np.ndarray,
+    ends: np.ndarray,
+    depths: np.ndarray,
+    cumulative_coverage: np.ndarray,
+) -> np.ndarray:
+    if len(points) == 0:
+        return np.array([], dtype=np.float64)
+    idx = np.searchsorted(ends, points, side="right")
+    prefix = np.zeros(len(points), dtype=np.float64)
+    has_prev = idx > 0
+    prefix[has_prev] = cumulative_coverage[idx[has_prev] - 1]
+    in_interval = idx < len(ends)
+    if np.any(in_interval):
+        current_idx = idx[in_interval]
+        prefix[in_interval] += (
+            points[in_interval] - starts[current_idx]
+        ) * depths[current_idx]
+    return prefix
+
+
 def return_ref_for_plotting(df, ref, thresh, rolling_window: int = None):
 
     ref_df = df.filter(pl.col("ref") == ref)
@@ -395,24 +425,54 @@ def return_ref_for_plotting(df, ref, thresh, rolling_window: int = None):
     else:
         if rolling_window is None:
             rolling_window = max(total_bases // 100_000, 1)
-        modulo = total_bases // 1000
+        modulo = max(total_bases // 1000, 1)
 
-    return (
-        ref_df.sort("start")
-        .with_columns(pos=pl.int_ranges(start="start", end="end"))
-        .explode(pl.col("pos"))
-        .with_columns(rolling=pl.col("depth").rolling_mean(window_size=rolling_window))
-        .with_columns(rolling=pl.col("rolling").fill_null(0))
-        .with_columns(
-            color=pl.when(pl.col("rolling") == 0)
-            .then(pl.lit(COLOR_ZERO))
-            .when(pl.col("rolling") > thresh)
-            .then(pl.lit(COLOR_HIGH))
-            .otherwise(pl.lit(COLOR_LOW))
+    ref_df = ref_df.sort("start")
+    starts = ref_df["start"].to_numpy().astype(np.int64)
+    ends = ref_df["end"].to_numpy().astype(np.int64)
+    depths = ref_df["depth"].to_numpy().astype(np.float64)
+    cumulative_coverage = np.cumsum((ends - starts) * depths, dtype=np.float64)
+
+    positions = np.arange(starts[0], ends[-1], modulo, dtype=np.int64)
+    local_positions = positions - positions[0]
+    rolling = np.zeros(len(positions), dtype=np.float64)
+    valid = local_positions >= (rolling_window - 1)
+    if np.any(valid):
+        window_end = positions[valid] + 1
+        window_start = positions[valid] - rolling_window + 1
+        window_sum = _coverage_prefix_for_points(
+            window_end, starts, ends, depths, cumulative_coverage
+        ) - _coverage_prefix_for_points(
+            window_start, starts, ends, depths, cumulative_coverage
         )
-        .with_row_index()
-        .filter(pl.col("index") % modulo == 0)
+        rolling[valid] = window_sum / rolling_window
+
+    colors = np.where(
+        rolling == 0,
+        COLOR_ZERO,
+        np.where(rolling > thresh, COLOR_HIGH, COLOR_LOW),
     )
+
+    first_row = ref_df.row(0, named=True)
+    plot_df = pl.DataFrame(
+        {
+            "index": positions,
+            "pos": positions,
+            "rolling": rolling,
+            "color": colors,
+        }
+    )
+    for column in (
+        "ref",
+        "pct_over_zero",
+        "pct_over_thresh",
+        "mean_coverage",
+        "median_coverage",
+    ):
+        if column in ref_df.columns:
+            plot_df = plot_df.with_columns(pl.lit(first_row[column]).alias(column))
+    plot_df = plot_df.with_columns(pl.lit(rolling_window).alias("rolling_window_used"))
+    return plot_df
 
 
 def coverage_plot(
@@ -442,13 +502,19 @@ def coverage_plot(
 
     legend_elements = [
         Line2D([0], [0], color=COLOR_ZERO, lw=1, label="0X"),
-        Line2D([0], [0], color=COLOR_LOW, lw=1, label="Over 0X"),
+        Line2D([0], [0], color=COLOR_LOW, lw=1, label=f"1X-{thresh}X"),
         Line2D([0], [0], color=COLOR_HIGH, lw=1, label=f"Over {thresh}X"),
     ]
     ax.legend(handles=legend_elements, loc="upper right")
 
+    rolling_window_used = (
+        df["rolling_window_used"][0]
+        if "rolling_window_used" in df.columns
+        else rolling_window
+    )
+
     plt.title(
-        f"Percent bases with coverage above {thresh}X: {df['pct_over_thresh'][0] * 100: .1f}% | Rolling window: {rolling_window} nt"
+        f"Percent bases with coverage above {thresh}X: {df['pct_over_thresh'][0] * 100: .1f}% | Rolling window: {rolling_window_used} nt"
     )
     plt.suptitle(f"Ref: {df['ref'][0]} | Sample: {sample_name}")
     plt.close()
@@ -546,8 +612,10 @@ def plot_depth_histogram_global(df, top_refs, n_bins=50):
     unique_rows = filtered.unique(subset=["ref", "start"])
     depths = unique_rows["depth"].to_numpy().astype(float)
     weights = unique_rows["n_bases"].to_numpy().astype(float)
-    mean_cov = filtered["mean_coverage_total"][0]
-    median_cov = filtered["median_coverage_total"][0]
+    mean_cov = float(np.average(depths, weights=weights)) if weights.sum() else 0.0
+    median_cov = weighted_median_rle(
+        unique_rows["depth"].to_numpy(), unique_rows["n_bases"].to_numpy()
+    )
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.hist(
@@ -816,40 +884,54 @@ def bam2plot_from_reads():
     )
 
 
-def _add_alignment_to_depth(df: pl.DataFrame, start: int, end: int) -> pl.DataFrame:
-    """Increment 1-based positions for a 0-based half-open alignment interval."""
-    if end <= start:
-        return df
-    return df.with_columns(
-        depth=pl.when(pl.col("pos").is_between(start + 1, end))
-        .then(pl.col("depth") + 1)
-        .otherwise(pl.col("depth"))
-    )
+def _load_reference_sequences(fastx_file: str) -> list[tuple[str, str]]:
+    references = [(entry[0], entry[1]) for entry in pyfastx.Fastx(fastx_file)]
+    if not references:
+        print_fail(f"[ERROR]: The reference file {fastx_file} is empty")
+        sys.exit(1)
+    return references
 
 
 def _load_single_reference_sequence(fastx_file: str) -> tuple[str, str]:
     """Return the single sequence in a reference FASTA/FASTQ input."""
-    record = None
-    for entry in pyfastx.Fastx(fastx_file):
-        name, sequence = entry[0], entry[1]
-        if record is not None:
-            print_fail(
-                f"[ERROR]: {fastx_file} contains multiple reference sequences. bam2plot currently supports a single reference for read-based workflows."
-            )
-            sys.exit(1)
-        record = (name, sequence)
-
-    if record is None:
-        print_fail(f"[ERROR]: The reference file {fastx_file} is empty")
+    references = _load_reference_sequences(fastx_file)
+    if len(references) != 1:
+        print_fail(
+            f"[ERROR]: {fastx_file} contains {len(references)} reference sequences. 'from_reads' currently supports a single reference; align first and use 'from_bam' for multi-reference inputs."
+        )
         sys.exit(1)
+    return references[0]
 
-    return record
+
+def _create_aligner(ref: str, preset: str):
+    aligner = mp.Aligner(ref, preset=preset)
+    if not aligner:
+        print_fail(f"[ERROR]: Could not initialize minimap2 index for reference: {ref}")
+        sys.exit(1)
+    return aligner
+
+
+def _add_alignment_to_array(diff: np.ndarray, start: int, end: int) -> None:
+    if end <= start:
+        return
+    diff[start] += 1
+    diff[end] -= 1
+
+
+def _diff_array_to_depth_df(diff: np.ndarray) -> pl.DataFrame:
+    depth = np.cumsum(diff[:-1], dtype=np.int64)
+    return pl.DataFrame(
+        {
+            "pos": np.arange(1, len(depth) + 1, dtype=np.int64),
+            "depth": depth,
+        }
+    )
+
 
 
 def map_fastq_to_ref_long_read(fastq, ref, ref_len, preset="map-ont") -> pl.DataFrame:
-    a = mp.Aligner(ref, preset=preset)
-
-    df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
+    a = _create_aligner(ref, preset)
+    diff = np.zeros(ref_len + 1, dtype=np.int64)
     reads_checked = 0
     found_alignment = False
 
@@ -857,7 +939,7 @@ def map_fastq_to_ref_long_read(fastq, ref, ref_len, preset="map-ont") -> pl.Data
         reads_checked += 1
         for hit in a.map(seq):
             found_alignment = True
-            df = _add_alignment_to_depth(df, hit.r_st, hit.r_en)
+            _add_alignment_to_array(diff, hit.r_st, hit.r_en)
 
         if not found_alignment and reads_checked > 1000:
             print_fail("[ERROR]: No alignment to this reference")
@@ -867,7 +949,7 @@ def map_fastq_to_ref_long_read(fastq, ref, ref_len, preset="map-ont") -> pl.Data
         print_fail("[ERROR]: No alignment to this reference")
         sys.exit(1)
 
-    return df
+    return _diff_array_to_depth_df(diff)
 
 
 def PE_reads_to_df(read_1, read_2) -> pl.DataFrame:
@@ -914,17 +996,16 @@ def _normalize_paired_read_name(name: str) -> str:
 
 
 def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, ref_len, preset="sr") -> pl.DataFrame:
-    a = mp.Aligner(ref, preset=preset)
+    a = _create_aligner(ref, preset)
     PE_df = PE_reads_to_df(fastq_1, fastq_2)
-
-    df = pl.DataFrame({"pos": np.arange(1, ref_len + 1), "depth": 0})
+    diff = np.zeros(ref_len + 1, dtype=np.int64)
     found_alignment = False
     for idx, reads in enumerate(PE_df.iter_rows(named=True), start=1):
         if idx == 1 or idx % 50_000 == 0:
             print_green(f"Processing read: {idx} of {PE_df.shape[0]}")
         for hit in a.map(reads["seq_1"], reads["seq_2"]):
             found_alignment = True
-            df = _add_alignment_to_depth(df, hit.r_st, hit.r_en)
+            _add_alignment_to_array(diff, hit.r_st, hit.r_en)
 
         if not found_alignment and idx > 1000:
             print_fail(f"[ERROR]: No alignment to this reference: {ref}")
@@ -934,7 +1015,7 @@ def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, ref_len, preset="sr") -> pl.
         print_fail(f"[ERROR]: No alignment to this reference: {ref}")
         sys.exit(1)
 
-    return df
+    return _diff_array_to_depth_df(diff)
 
 
 def plot_from_reads(
@@ -955,21 +1036,21 @@ def plot_from_reads(
 
 
 def ref_to_seq_df(fastx_file: str) -> pl.DataFrame:
-    name, sequence = _load_single_reference_sequence(fastx_file)
-
-    df = (
-        pl.DataFrame(
-            {
-                "name": [name],
-                "sequence": [sequence],
-            }
+    frames = []
+    for name, sequence in _load_reference_sequences(fastx_file):
+        frame = (
+            pl.DataFrame(
+                {
+                    "name": [name],
+                    "sequence": [sequence],
+                }
+            )
+            .select(pl.col("sequence").str.split("").explode(), pl.col("name"))
+            .filter(pl.col("sequence") != "")
+            .with_row_index(name="position", offset=1)
         )
-        .select(pl.col("sequence").str.split("").explode(), pl.col("name"))
-        .filter(pl.col("sequence") != "")
-        .with_row_index(name="position", offset=1)
-    )
-
-    return df
+        frames.append(frame)
+    return pl.concat(frames)
 
 
 def add_gc(df) -> pl.DataFrame:
@@ -987,20 +1068,46 @@ def add_rolling_mean(df, window):
 def guci(fastx_file, window):
     df = ref_to_seq_df(fastx_file)
     df = add_gc(df)
-    df = add_rolling_mean(df, window).select(pl.col("position"), pl.col("rolling_gc"))
+    df = add_rolling_mean(df, window).select(
+        pl.col("name"), pl.col("position"), pl.col("rolling_gc")
+    )
     return df
 
 
 def plot_gc(df, title):
-    fig = plt.figure(figsize=(50, 15))
-    ax = plt.gca()
-    ax.plot(df["position"], df["rolling_gc"])
-    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0))
-    ax.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:,.0f}"))
-    plt.ylabel("% GC content")
-    plt.xlabel("Position")
-    plt.title(title)
-    plt.close()
+    ref_names = (
+        df["name"].unique().sort().to_list() if "name" in df.columns else ["reference"]
+    )
+
+    if len(ref_names) == 1:
+        fig = plt.figure(figsize=(50, 15))
+        ax = plt.gca()
+        ax.plot(df["position"], df["rolling_gc"])
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0))
+        ax.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:,.0f}"))
+        plt.ylabel("% GC content")
+        plt.xlabel("Position")
+        plt.title(title if "name" not in df.columns else f"{title} ({ref_names[0]})")
+    else:
+        fig, axes = plt.subplots(
+            len(ref_names),
+            1,
+            figsize=(24, max(4 * len(ref_names), 8)),
+            squeeze=False,
+        )
+        for ax, ref_name in zip(axes.ravel(), ref_names):
+            ref_df = df.filter(pl.col("name") == ref_name)
+            ax.plot(ref_df["position"], ref_df["rolling_gc"])
+            ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0))
+            ax.xaxis.set_major_formatter(
+                matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
+            )
+            ax.set_ylabel("% GC content")
+            ax.set_xlabel("Position")
+            ax.set_title(ref_name)
+        fig.suptitle(title)
+        fig.tight_layout(rect=[0, 0, 1, 0.98])
+    plt.close(fig)
     return fig
 
 
@@ -1231,7 +1338,7 @@ def process_dataframe(bam, threshold):
     except Exception as e:
         print_fail(f"[ERROR]: Could not process dataframe ({e})")
         print_warning(
-            "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot <file.bam> -s' or 'bam2plot <file.bam> -i'"
+            "[WARNING]: Is the file properly prepared? If not, consider running 'bam2plot from_bam -b <file.bam> -s' or 'bam2plot from_bam -b <file.bam> -i'"
         )
         sys.exit(1)
 
@@ -1266,6 +1373,92 @@ def _fig_to_base64(fig) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
+def _slice_raw_df(df: pl.DataFrame, start: int, end: int) -> pl.DataFrame:
+    zoom_end = end + 1
+    return (
+        df.select("ref", "start", "end", "depth")
+        .filter((pl.col("end") > start) & (pl.col("start") < zoom_end))
+        .with_columns(
+            start=pl.max_horizontal(pl.col("start"), pl.lit(start)),
+            end=pl.min_horizontal(pl.col("end"), pl.lit(zoom_end)),
+        )
+        .filter(pl.col("start") < pl.col("end"))
+    )
+
+
+def _summary_global_record(df: pl.DataFrame, threshold: int) -> dict:
+    row = df.row(0, named=True)
+    return {
+        "mean_coverage": round(float(row["mean_coverage_total"]), 4),
+        "median_coverage": round(float(row["median_coverage_total"]), 4),
+        "pct_over_zero": round(float(row["pct_total_over_zero"] * 100), 4),
+        f"pct_over_{threshold}x": round(float(row["pct_total_over_thresh"] * 100), 4),
+    }
+
+
+def _summary_per_reference_records(df: pl.DataFrame, top_refs: list, threshold: int) -> list:
+    records = []
+    for ref in top_refs:
+        row = df.filter(pl.col("ref") == ref).row(0, named=True)
+        records.append(
+            {
+                "reference": ref,
+                "total_bases": int(row["total_bases"]),
+                "mean_coverage": round(float(row["mean_coverage"]), 4),
+                "median_coverage": round(float(row["median_coverage"]), 4),
+                "pct_over_zero": round(float(row["pct_over_zero"] * 100), 4),
+                f"pct_over_{threshold}x": round(
+                    float(row["pct_over_thresh"] * 100), 4
+                ),
+                "gini_coefficient": round(float(row["gini_coefficient"]), 6),
+            }
+        )
+    return records
+
+
+def write_summary_outputs(
+    sample_name: str,
+    bam: str,
+    threshold: int,
+    rolling_window: int,
+    df: pl.DataFrame,
+    top_refs: list,
+    outpath: str,
+    zoom=None,
+    insert_size_stats: dict = None,
+) -> None:
+    summary = {
+        "sample": sample_name,
+        "bam": bam,
+        "threshold": threshold,
+        "rolling_window": rolling_window,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "analysis_scope": "zoom" if zoom is not None else "whole_reference",
+        "zoom": {"start": zoom[0], "end": zoom[1]} if zoom is not None else None,
+        "global": _summary_global_record(df, threshold),
+        "references": _summary_per_reference_records(df, top_refs, threshold),
+    }
+    if insert_size_stats is not None:
+        summary["insert_size"] = insert_size_stats
+
+    json_path = Path(outpath) / f"{sample_name}_summary.json"
+    json_path.write_text(json.dumps(summary, indent=2))
+
+    tsv_rows = [
+        {
+            "sample": sample_name,
+            "analysis_scope": summary["analysis_scope"],
+            "zoom_start": zoom[0] if zoom is not None else None,
+            "zoom_end": zoom[1] if zoom is not None else None,
+            **record,
+        }
+        for record in summary["references"]
+    ]
+    tsv_path = Path(outpath) / f"{sample_name}_summary.tsv"
+    pl.DataFrame(tsv_rows).write_csv(tsv_path, separator="\t")
+    print_green(f"[INFO]: Summary files saved to {json_path.resolve()} and {tsv_path.resolve()}")
+
+
 def generate_html_report(
     sample_name: str,
     bam: str,
@@ -1281,8 +1474,22 @@ def generate_html_report(
     lorenz_fig=None,
     insert_size_fig=None,
     insert_size_stats: dict = None,
+    zoom=None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sample_name_html = html_escape(sample_name, quote=True)
+    bam_html = html_escape(bam, quote=True)
+    zoom_html = (
+        f" &nbsp;|&nbsp; <strong>Region:</strong> {zoom[0]}-{zoom[1]}"
+        if zoom is not None
+        else ""
+    )
+    summary_heading = "Global Summary (Zoom Region)" if zoom is not None else "Global Summary"
+    per_ref_heading = (
+        "Per-Reference Statistics (Zoom Region)"
+        if zoom is not None
+        else "Per-Reference Statistics"
+    )
 
     # Global summary stats
     first_row = df.row(0, named=True)
@@ -1304,10 +1511,11 @@ def generate_html_report(
     for ref in top_refs:
         ref_df = df.filter(pl.col("ref") == ref)
         row = ref_df.row(0, named=True)
+        ref_html = html_escape(ref, quote=True)
         median_td = f"<td>{row['median_coverage']:.1f}X</td>" if has_median else ""
         gini_td = f"<td>{row['gini_coefficient']:.3f}</td>" if has_gini else ""
         per_ref_rows.append(f"""<tr>
-            <td>{ref}</td>
+            <td>{ref_html}</td>
             <td>{row['total_bases']:,}</td>
             <td>{row['mean_coverage']:.1f}X</td>
             {median_td}
@@ -1323,9 +1531,10 @@ def generate_html_report(
     plot_sections = []
     for ref_name, fig in coverage_figures:
         b64 = _fig_to_base64(fig)
+        ref_html = html_escape(ref_name, quote=True)
         plot_sections.append(f"""<div class="plot-section">
-            <h3>{ref_name}</h3>
-            <img src="data:image/png;base64,{b64}" alt="Coverage plot for {ref_name}">
+            <h3>{ref_html}</h3>
+            <img src="data:image/png;base64,{b64}" alt="Coverage plot for {ref_html}">
             </div>""")
     plots_html = "\n".join(plot_sections)
 
@@ -1351,9 +1560,10 @@ def generate_html_report(
         if depth_hist_figures:
             for ref_name, fig in depth_hist_figures:
                 b64 = _fig_to_base64(fig)
+                ref_html = html_escape(ref_name, quote=True)
                 depth_html += f"""<div class="plot-section">
-                <h3>{ref_name}</h3>
-                <img src="data:image/png;base64,{b64}" alt="Depth histogram for {ref_name}">
+                <h3>{ref_html}</h3>
+                <img src="data:image/png;base64,{b64}" alt="Depth histogram for {ref_html}">
                 </div>"""
 
     # Lorenz curves section
@@ -1391,7 +1601,7 @@ def generate_html_report(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>bam2plot Report — {sample_name}</title>
+<title>bam2plot Report — {sample_name_html}</title>
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; color: #333; }}
 .container {{ max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
@@ -1411,11 +1621,11 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 <div class="container">
 <h1>bam2plot Report</h1>
 <div class="meta">
-<p><strong>Sample:</strong> {sample_name} &nbsp;|&nbsp; <strong>BAM:</strong> {bam}</p>
-<p><strong>Threshold:</strong> {threshold}X &nbsp;|&nbsp; <strong>Rolling window:</strong> {rolling_window} nt &nbsp;|&nbsp; <strong>Generated:</strong> {timestamp}</p>
+<p><strong>Sample:</strong> {sample_name_html} &nbsp;|&nbsp; <strong>BAM:</strong> {bam_html}</p>
+<p><strong>Threshold:</strong> {threshold}X &nbsp;|&nbsp; <strong>Rolling window:</strong> {rolling_window} nt{zoom_html} &nbsp;|&nbsp; <strong>Generated:</strong> {timestamp}</p>
 </div>
 
-<h2>Global Summary</h2>
+<h2>{summary_heading}</h2>
 <table>
 <tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Mean coverage</td><td>{global_mean_cov:.1f}X</td></tr>
@@ -1424,7 +1634,7 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 <tr><td>Bases with coverage &gt; {threshold}X</td><td>{global_pct_thresh:.1f}%</td></tr>
 </table>
 
-<h2>Per-Reference Statistics</h2>
+<h2>{per_ref_heading}</h2>
 <table>
 <tr><th>Reference</th><th>Total bases</th><th>Mean coverage</th>{median_th}<th>&gt; 0X</th><th>&gt; {threshold}X</th>{gini_th}</tr>
 {per_ref_html}
@@ -1502,7 +1712,18 @@ def main_from_bam(
             sys.exit(1)
         df = _refresh_coverage_stats(df, threshold)
 
-    print_total_reference_info(df, threshold)
+    analysis_df = df
+    zoom_region = None
+    if zoom:
+        zoom_region = (start, end)
+        print_green(f"[INFO]: Restricting analysis to zoom region {start}-{end}")
+        zoom_df = _slice_raw_df(df, start, end)
+        if zoom_df.is_empty():
+            print_fail("[ERROR]: No bases remain after applying the zoom region")
+            sys.exit(1)
+        analysis_df = enrich_coverage_df(zoom_df, threshold)
+
+    print_total_reference_info(analysis_df, threshold)
 
     if number_of_refs == 0:
         print_fail("[ERROR]: No reference to plot against!")
@@ -1511,17 +1732,13 @@ def main_from_bam(
     plot_text = "plot" if number_of_refs == 1 else "plots"
     print_green(f"[INFO]: Generating {number_of_refs} {plot_text}:")
 
-    top_n_refs = refs_with_most_coverage(df, n=number_of_refs)
+    top_n_refs = refs_with_most_coverage(analysis_df, n=number_of_refs)
     coverage_figures = []
 
     for reference in top_n_refs:
-        df_to_plot = return_ref_for_plotting(df, reference, threshold, rolling_window)
-
-        if zoom:
-            df_to_plot = df_to_plot.filter(pl.col("pos").is_between(start, end))
-            if df_to_plot.shape[0] == 0:
-                print_warning("[WARNING]: No positions to plot after zoom")
-                continue
+        df_to_plot = return_ref_for_plotting(
+            analysis_df, reference, threshold, rolling_window
+        )
 
         if df_to_plot.shape[0] == 0:
             print_warning("[WARNING]: No positions to plot")
@@ -1546,27 +1763,27 @@ def main_from_bam(
     cum_fig = None
     if cum_plot:
         print_green("[INFO]: Generating cumulative coverage plots for each reference")
-        cum_fig = plot_cumulative_coverage_for_all(df, n=number_of_refs)
+        cum_fig = plot_cumulative_coverage_for_all(analysis_df, n=number_of_refs)
         save_plot_cum(cum_fig, outpath, bam, plot_type)
 
     # Depth histograms
     print_green("[INFO]: Generating depth distribution histograms")
     depth_hist_figures = []
     for reference in top_n_refs:
-        hist_fig = plot_depth_histogram(df, reference)
+        hist_fig = plot_depth_histogram(analysis_df, reference)
         depth_hist_figures.append((reference, hist_fig))
         _save_plot(
             hist_fig, f"{outpath}/{sample_name}_depth_hist_{reference}", plot_type
         )
 
-    global_depth_hist_fig = plot_depth_histogram_global(df, top_n_refs)
+    global_depth_hist_fig = plot_depth_histogram_global(analysis_df, top_n_refs)
     _save_plot(
         global_depth_hist_fig, f"{outpath}/{sample_name}_depth_hist_global", plot_type
     )
 
     # Lorenz curves
     print_green("[INFO]: Generating coverage uniformity (Lorenz) curves")
-    lorenz_fig = plot_lorenz_curves(df, top_n_refs)
+    lorenz_fig = plot_lorenz_curves(analysis_df, top_n_refs)
     _save_plot(lorenz_fig, f"{outpath}/{sample_name}_lorenz", plot_type)
 
     # Insert size distribution
@@ -1589,12 +1806,24 @@ def main_from_bam(
     else:
         print_green("[INFO]: No paired-end data found — skipping insert size plot")
 
+    write_summary_outputs(
+        sample_name=sample_name,
+        bam=bam,
+        threshold=threshold,
+        rolling_window=rolling_window,
+        df=analysis_df,
+        top_refs=top_n_refs,
+        outpath=outpath,
+        zoom=zoom_region,
+        insert_size_stats=insert_size_stats,
+    )
+
     generate_html_report(
         sample_name=sample_name,
         bam=bam,
         threshold=threshold,
         rolling_window=rolling_window,
-        df=df,
+        df=analysis_df,
         top_refs=top_n_refs,
         coverage_figures=coverage_figures,
         cum_fig=cum_fig,
@@ -1604,6 +1833,7 @@ def main_from_bam(
         lorenz_fig=lorenz_fig,
         insert_size_fig=insert_size_fig,
         insert_size_stats=insert_size_stats,
+        zoom=zoom_region,
     )
 
     print_green(f"[INFO]: Plots location: {Path(outpath).resolve()}")
