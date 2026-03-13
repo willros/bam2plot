@@ -12,8 +12,7 @@ from bam2plot.main import (
 
 def _write_fastq(path: Path, records: list[tuple[str, str]]) -> None:
     content = "".join(
-        f"@{name}\n{sequence}\n+\n{'I' * len(sequence)}\n"
-        for name, sequence in records
+        f"@{name}\n{sequence}\n+\n{'I' * len(sequence)}\n" for name, sequence in records
     )
     path.write_text(content)
 
@@ -49,7 +48,9 @@ def test_load_single_reference_sequence_rejects_multi_record_reference(tmp_path)
         _load_single_reference_sequence(str(reference))
 
 
-def test_refresh_coverage_stats_recomputes_global_totals_for_filtered_subset(single_ref_df):
+def test_refresh_coverage_stats_recomputes_global_totals_for_filtered_subset(
+    single_ref_df,
+):
     refreshed = _refresh_coverage_stats(single_ref_df, threshold=10)
 
     assert refreshed["mean_coverage_total"][0] == pytest.approx(2500 / 300)
@@ -64,7 +65,9 @@ def test_main_guci_plot_type_both_writes_png_and_svg(tmp_path):
     reference.write_text(">ref1\nACGTACGT\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        main_guci(str(reference), window=2, out_folder=str(output_dir), plot_type="both")
+        main_guci(
+            str(reference), window=2, out_folder=str(output_dir), plot_type="both"
+        )
 
     assert exc_info.value.code == 0
     assert (output_dir / "gc_reference.png").exists()

@@ -29,5 +29,8 @@ jobs:
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
+      - name: Check formatting
+        run: pixi run format-check
+
       - name: Run test suite
         run: pixi run test

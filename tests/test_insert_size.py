@@ -126,6 +126,7 @@ def mixed_quality_pairs_bam(tmp_path):
     )
 
     with pysam.AlignmentFile(bam_path, "wb", header=header) as outf:
+
         def make_segment(name, flag, start, tlen):
             segment = pysam.AlignedSegment(outf.header)
             segment.query_name = name

@@ -6,7 +6,6 @@ import sys
 import pysam
 from bam2plot import __version__
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

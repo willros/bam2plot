@@ -408,9 +408,9 @@ def _coverage_prefix_for_points(
     in_interval = idx < len(ends)
     if np.any(in_interval):
         current_idx = idx[in_interval]
-        prefix[in_interval] += (
-            points[in_interval] - starts[current_idx]
-        ) * depths[current_idx]
+        prefix[in_interval] += (points[in_interval] - starts[current_idx]) * depths[
+            current_idx
+        ]
     return prefix
 
 
@@ -928,7 +928,6 @@ def _diff_array_to_depth_df(diff: np.ndarray) -> pl.DataFrame:
     )
 
 
-
 def map_fastq_to_ref_long_read(fastq, ref, ref_len, preset="map-ont") -> pl.DataFrame:
     a = _create_aligner(ref, preset)
     diff = np.zeros(ref_len + 1, dtype=np.int64)
@@ -995,7 +994,9 @@ def _normalize_paired_read_name(name: str) -> str:
     return name
 
 
-def map_fastq_to_ref_PE_read(fastq_1, fastq_2, ref, ref_len, preset="sr") -> pl.DataFrame:
+def map_fastq_to_ref_PE_read(
+    fastq_1, fastq_2, ref, ref_len, preset="sr"
+) -> pl.DataFrame:
     a = _create_aligner(ref, preset)
     PE_df = PE_reads_to_df(fastq_1, fastq_2)
     diff = np.zeros(ref_len + 1, dtype=np.int64)
@@ -1396,7 +1397,9 @@ def _summary_global_record(df: pl.DataFrame, threshold: int) -> dict:
     }
 
 
-def _summary_per_reference_records(df: pl.DataFrame, top_refs: list, threshold: int) -> list:
+def _summary_per_reference_records(
+    df: pl.DataFrame, top_refs: list, threshold: int
+) -> list:
     records = []
     for ref in top_refs:
         row = df.filter(pl.col("ref") == ref).row(0, named=True)
@@ -1407,9 +1410,7 @@ def _summary_per_reference_records(df: pl.DataFrame, top_refs: list, threshold: 
                 "mean_coverage": round(float(row["mean_coverage"]), 4),
                 "median_coverage": round(float(row["median_coverage"]), 4),
                 "pct_over_zero": round(float(row["pct_over_zero"] * 100), 4),
-                f"pct_over_{threshold}x": round(
-                    float(row["pct_over_thresh"] * 100), 4
-                ),
+                f"pct_over_{threshold}x": round(float(row["pct_over_thresh"] * 100), 4),
                 "gini_coefficient": round(float(row["gini_coefficient"]), 6),
             }
         )
@@ -1456,7 +1457,9 @@ def write_summary_outputs(
     ]
     tsv_path = Path(outpath) / f"{sample_name}_summary.tsv"
     pl.DataFrame(tsv_rows).write_csv(tsv_path, separator="\t")
-    print_green(f"[INFO]: Summary files saved to {json_path.resolve()} and {tsv_path.resolve()}")
+    print_green(
+        f"[INFO]: Summary files saved to {json_path.resolve()} and {tsv_path.resolve()}"
+    )
 
 
 def generate_html_report(
@@ -1484,7 +1487,9 @@ def generate_html_report(
         if zoom is not None
         else ""
     )
-    summary_heading = "Global Summary (Zoom Region)" if zoom is not None else "Global Summary"
+    summary_heading = (
+        "Global Summary (Zoom Region)" if zoom is not None else "Global Summary"
+    )
     per_ref_heading = (
         "Per-Reference Statistics (Zoom Region)"
         if zoom is not None
