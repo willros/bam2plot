@@ -21,6 +21,8 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 import pyfastx
 
+from bam2plot import __version__
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # for windows users
@@ -661,6 +663,10 @@ def make_dir(outpath: str) -> None:
 def cli():
     args = sys.argv
     valid_subcommand = ["from_bam", "from_reads", "guci"]
+
+    if len(args) == 2 and args[1] in ["--version", "-V"]:
+        print(__version__)
+        sys.exit(0)
 
     if len(args) < 2:
         print_fail("You must call bam2plot with the following subcommands:")
