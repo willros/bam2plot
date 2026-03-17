@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 759392.56 52755"
+   role="img"
+   aria-labelledby="title desc"
+   version="1.1"
+   id="svg29"
+   width="759392.56"
+   height="52755"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <title
+     id="title">bam2plot logo</title>
+  <desc
+     id="desc">A simplified BAM tracks and coverage curve logo for the bam2plot package.</desc>
+  <defs
+     id="defs2" />
+  <g
+     id="g38"
+     transform="translate(-370800,-15773.75)">
+    <g
+       id="g37">
+      <g
+         id="g36">
+        <g
+           id="g35"
+           transform="translate(138.72,-36.827031)">
+          <g
+             id="g34">
+            <g
+               id="g33">
+              <path
+                 d="m 171.84,107.44 h 59.28"
+                 id="path8"
+                 style="stroke:#93c5fd;stroke-width:2.08;stroke-linecap:round;stroke-opacity:0.16" />
+              <path
+                 d="m 171.84,139.68 h 59.28"
+                 stroke-dasharray="5.2, 6.24"
+                 id="path9"
+                 style="stroke:#93c5fd;stroke-width:2.08;stroke-linecap:round;stroke-opacity:0.16" />
+              <path
+                 d="m 171.84,171.92 h 59.28"
+                 stroke-dasharray="5.2, 6.24"
+                 id="path10"
+                 style="stroke:#93c5fd;stroke-width:2.08;stroke-linecap:round;stroke-opacity:0.16" />
+              <path
+                 d="m 171.84,207.28 h 59.28"
+                 id="path17"
+                 style="opacity:0.55;fill:none;stroke:#94a3b8;stroke-width:3.12;stroke-linecap:round;stroke-linejoin:round" />
+              <path
+                 d="M 171.84,207.28 V 87.68"
+                 id="path18"
+                 style="opacity:0.55;fill:none;stroke:#94a3b8;stroke-width:3.12;stroke-linecap:round;stroke-linejoin:round" />
+              <path
+                 d="m 179.12,192.72 c 4.16,-1.04 7.28,-2.08 11.44,-3.12"
+                 id="path19"
+                 style="fill:none;stroke:#ffffff;stroke-width:9.36;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:0.16" />
+              <path
+                 d="m 190.56,189.6 c 6.24,-5.2 9.36,-15.6 12.48,-24.96 4.16,-11.44 8.32,-17.68 13.52,-20.8"
+                 id="path20"
+                 style="fill:none;stroke:#ffffff;stroke-width:9.36;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:0.16" />
+              <path
+                 d="m 216.56,143.84 c 6.24,-7.28 9.36,-27.04 13.52,-40.56"
+                 id="path21"
+                 style="fill:none;stroke:#ffffff;stroke-width:9.36;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:0.16" />
+              <path
+                 d="m 179.12,192.72 c 4.16,-1.04 7.28,-2.08 11.44,-3.12"
+                 stroke="#ef4444"
+                 id="path22"
+                 style="fill:none;stroke-width:6.24;stroke-linecap:round;stroke-linejoin:round" />
+              <path
+                 d="m 190.56,189.6 c 6.24,-5.2 9.36,-15.6 12.48,-24.96 4.16,-11.44 8.32,-17.68 13.52,-20.8"
+                 stroke="#facc15"
+                 id="path23"
+                 style="fill:none;stroke-width:6.24;stroke-linecap:round;stroke-linejoin:round" />
+              <path
+                 d="m 216.56,143.84 c 6.24,-7.28 9.36,-27.04 13.52,-40.56"
+                 stroke="#38bdf8"
+                 id="path24"
+                 style="fill:none;stroke-width:6.24;stroke-linecap:round;stroke-linejoin:round" />
+              <circle
+                 cx="179.12"
+                 cy="192.72"
+                 r="3.6400001"
+                 fill="#ef4444"
+                 id="circle24"
+                 style="stroke-width:0.52" />
+              <circle
+                 cx="216.56"
+                 cy="143.84"
+                 r="3.6400001"
+                 fill="#facc15"
+                 id="circle25"
+                 style="stroke-width:0.52" />
+              <circle
+                 cx="230.08"
+                 cy="103.28"
+                 r="3.6400001"
+                 fill="#38bdf8"
+                 id="circle26"
+                 style="stroke-width:0.52" />
+            </g>
+          </g>
+        </g>
+        <g
+           id="g32"
+           transform="translate(97.361816)">
+          <g
+             id="g31">
+            <g
+               id="g30">
+              <g
+                 id="g29">
+                <text
+                   x="312"
+                   y="124"
+                   font-family="'Trebuchet MS', Verdana, 'DejaVu Sans', sans-serif"
+                   font-size="100px"
+                   font-weight="700"
+                   fill="#0f172a"
+                   id="text26">bam2</text>
+                <text
+                   x="566"
+                   y="124"
+                   font-family="'Trebuchet MS', Verdana, 'DejaVu Sans', sans-serif"
+                   font-size="100px"
+                   font-weight="700"
+                   fill="#2563eb"
+                   id="text27">plot</text>
+                <path
+                   d="M 314,154 H 438"
+                   stroke="#ef4444"
+                   stroke-width="10"
+                   stroke-linecap="round"
+                   id="path27" />
+                <path
+                   d="M 448,154 H 584"
+                   stroke="#facc15"
+                   stroke-width="10"
+                   stroke-linecap="round"
+                   id="path28" />
+                <path
+                   d="M 594,154 H 742"
+                   stroke="#38bdf8"
+                   stroke-width="10"
+                   stroke-linecap="round"
+                   id="path29" />
+              </g>
+            </g>
+          </g>
+        </g>
+        <text
+           x="308.04785"
+           y="208"
+           font-family="'Trebuchet MS', Verdana, 'DejaVu Sans', sans-serif"
+           font-size="30px"
+           font-weight="600"
+           fill="#475569"
+           id="text29">coverage plots and QC reports from BAM files</text>
+      </g>
+    </g>
+  </g>
+</svg>

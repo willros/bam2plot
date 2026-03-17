@@ -1,8 +1,9 @@
-# bam2plot
+![coverage plot](assets/bam2plot.png)
 
-Generate coverage plots and QC reports from BAM files. No external tools required.
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15052225.svg)](https://zenodo.org/records/15052225)
+<p align="center">
+  <a href="https://zenodo.org/records/15052225"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.15052225.svg" alt="DOI"></a>
+  <a href="https://pepy.tech/projects/bam2plot"><img src="https://static.pepy.tech/personalized-badge/bam2plot?period=total&units=international_system&left_color=grey&right_color=blue&left_text=downloads" alt="PyPI Downloads"></a>
+</p>
 
 ## Features
 
