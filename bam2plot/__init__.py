@@ -8,7 +8,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 __author__ = "William Rosenbaum"
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     "__author__",
